@@ -1,0 +1,102 @@
+package ingestion
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/google/uuid"
+
+	"github.com/mtariq99/retrievion/models"
+	"github.com/mtariq99/retrievion/pkg/objectstorage"
+)
+
+// EmbeddingProvider matches internal/embedding.Provider (structural match,
+// no import needed unless you want the explicit dependency).
+type EmbeddingProvider interface {
+	Embed(ctx context.Context, texts []string) ([][]float32, error)
+}
+
+type Pipeline struct {
+	repo     *Repository
+	storage  objectstorage.Storage
+	parser   Parser
+	chunker  Chunker
+	embedder EmbeddingProvider
+}
+
+func NewPipeline(repo *Repository, storage objectstorage.Storage, parser Parser, chunker Chunker, embedder EmbeddingProvider) *Pipeline {
+	return &Pipeline{repo: repo, storage: storage, parser: parser, chunker: chunker, embedder: embedder}
+}
+
+func (p *Pipeline) Process(ctx context.Context, job models.Job) error {
+	if err := p.repo.MarkJobProcessing(ctx, job.JobID); err != nil {
+		return err
+	}
+
+	version, err := p.repo.GetVersionForIngestion(ctx, job.DocumentVersionID)
+	if err != nil {
+		return p.fail(ctx, job.JobID, fmt.Errorf("load version: %w", err))
+	}
+	tenantID := version.TenantID
+
+	obj, err := p.storage.Download(ctx, version.StorageKey)
+	if err != nil {
+		return p.fail(ctx, job.JobID, fmt.Errorf("download object: %w", err))
+	}
+	defer obj.Close()
+
+	parsed, err := p.parser.Parse(ctx, obj, version.MimeType)
+	if err != nil {
+		return p.fail(ctx, job.JobID, fmt.Errorf("parse document: %w", err))
+	}
+
+	chunks, err := p.chunker.Chunk(ctx, parsed, job.DocumentVersionID)
+	if err != nil {
+		return p.fail(ctx, job.JobID, fmt.Errorf("chunk document: %w", err))
+	}
+
+	var texts []string
+	var textChunkIDs []uuid.UUID
+	for _, c := range chunks {
+		if c.IsParent {
+			continue // only children are embedded (README §19)
+		}
+		texts = append(texts, c.Content)
+		textChunkIDs = append(textChunkIDs, c.ID)
+	}
+
+	embeddings := make(map[uuid.UUID][]float32, len(texts))
+	if len(texts) > 0 {
+		vectors, err := p.embedder.Embed(ctx, texts)
+		if err != nil {
+			return p.fail(ctx, job.JobID, fmt.Errorf("generate embeddings: %w", err))
+		}
+		if len(vectors) != len(texts) {
+			return p.fail(ctx, job.JobID, fmt.Errorf("embedding count mismatch: got %d, want %d", len(vectors), len(texts)))
+		}
+		for i, id := range textChunkIDs {
+			embeddings[id] = vectors[i]
+		}
+	}
+
+	if err := p.repo.StoreChunks(ctx, tenantID, version.DocumentID, chunks, embeddings); err != nil {
+		return p.fail(ctx, job.JobID, fmt.Errorf("store chunks: %w", err))
+	}
+
+	if err := p.repo.ActivateVersion(ctx, job.DocumentID, job.DocumentVersionID); err != nil {
+		return p.fail(ctx, job.JobID, fmt.Errorf("activate version: %w", err))
+	}
+
+	if err := p.repo.MarkJobCompleted(ctx, job.JobID); err != nil {
+		return fmt.Errorf("mark job completed: %w", err)
+	}
+
+	return nil
+}
+
+func (p *Pipeline) fail(ctx context.Context, jobID uuid.UUID, cause error) error {
+	if markErr := p.repo.MarkJobFailed(ctx, jobID, cause); markErr != nil {
+		return fmt.Errorf("%w (also failed to record failure: %v)", cause, markErr)
+	}
+	return cause
+}

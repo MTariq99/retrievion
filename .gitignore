@@ -1,0 +1,236 @@
+# ============================================================
+
+# Environment & Secrets
+
+# ============================================================
+
+.env
+.env.*
+!.env.example
+
+# Local secret/config files
+
+*.secret
+*.secrets
+*.key
+*.pem
+*.crt
+*.cer
+*.p12
+*.pfx
+
+# Credentials
+
+credentials.json
+credentials.yaml
+credentials.yml
+secrets.json
+secrets.yaml
+secrets.yml
+service-account.json
+*-credentials.json
+
+# ============================================================
+
+# Go
+
+# ============================================================
+
+# Build binaries
+
+/bin/
+/build/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go test/build artifacts
+
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Go workspace
+
+go.work
+go.work.sum
+
+# ============================================================
+
+# Logs
+
+# ============================================================
+
+*.log
+logs/
+log/
+
+# ============================================================
+
+# Temporary / Runtime Files
+
+# ============================================================
+
+tmp/
+temp/
+.cache/
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# ============================================================
+
+# Local Database / Storage
+
+# ============================================================
+
+# SQLite / local DB files
+
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Local application storage
+
+storage/
+data/
+uploads/
+
+# Docker local volumes if accidentally created in project
+
+postgres-data/
+redis-data/
+rabbitmq-data/
+
+# ============================================================
+
+# IDE / Editors
+
+# ============================================================
+
+# VS Code
+
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# JetBrains
+
+.idea/
+*.iml
+
+# Vim / Neovim
+
+.nvim/
+.vim/
+*.swp
+*.swo
+
+# macOS
+
+.DS_Store
+
+# Windows
+
+Thumbs.db
+Desktop.ini
+
+# ============================================================
+
+# Docker / Local Overrides
+
+# ============================================================
+
+docker-compose.override.yml
+docker-compose.local.yml
+docker-compose.dev.yml
+
+# ============================================================
+
+# Generated Files
+
+# ============================================================
+
+*.generated.go
+
+# Wire generated files are intentionally tracked in this project,
+
+# so DO NOT ignore wire_gen.go.
+
+# internal/*/wire_gen.go
+
+# ============================================================
+
+# OS / Editor Metadata
+
+# ============================================================
+
+.Trashes
+.fseventsd
+.AppleDouble
+
+# ============================================================
+
+# Profiling / Debugging
+
+# ============================================================
+
+*.prof
+*.pprof
+*.heap
+*.cpuprofile
+*.memprofile
+
+# ============================================================
+
+# Terraform / Infrastructure Secrets
+
+# ============================================================
+
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# ============================================================
+
+# Certificates / TLS
+
+# ============================================================
+
+certs/
+secrets/
+private/
+keys/
+
+# ============================================================
+
+# Local AI / Model Artifacts
+
+# ============================================================
+
+models/
+*.gguf
+*.safetensors
+*.bin
+
+# ============================================================
+
+# OS-specific
+
+# ============================================================
+
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
