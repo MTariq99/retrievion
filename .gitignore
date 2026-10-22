@@ -98,11 +98,7 @@ temp/
 *.sqlite
 *.sqlite3
 
-# Local application storage
 
-storage/
-data/
-uploads/
 
 # Docker local volumes if accidentally created in project
 
@@ -214,10 +210,8 @@ keys/
 # ============================================================
 
 # Local AI / Model Artifacts
-
-# ============================================================
-
-models/
+# Ignore model artifacts, not Go source directories.
+ models/
 *.gguf
 *.safetensors
 *.bin
