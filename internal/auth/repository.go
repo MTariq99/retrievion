@@ -12,11 +12,6 @@ import (
 	"github.com/mtariq99/retrievion/models"
 )
 
-// Repository implements userReader, userWriter, and membershipRepo
-// (see service.go) against Postgres. Kept as a single struct because
-// registration touches users, tenants, and tenant_members together
-// inside one transaction — splitting it into three repos would just
-// push that transaction coordination up into the service layer.
 type Repository struct {
 	db *sql.DB
 }
@@ -130,20 +125,34 @@ func (r *Repository) CreateMembership(ctx context.Context, m *models.TenantMembe
 
 func (r *Repository) GetMembership(ctx context.Context, tenantID, userID uuid.UUID) (*models.TenantMember, error) {
 	const query = `
-		SELECT tenant_id, user_id, role, created_at
-		FROM tenant_members
-		WHERE tenant_id = $1 AND user_id = $2
+		SELECT
+			tm.tenant_id,
+			t.name,
+			tm.user_id,
+			tm.role,
+			tm.created_at
+		FROM tenant_members tm
+		INNER JOIN tenants t ON t.id = tm.tenant_id
+		WHERE tm.tenant_id = $1 AND tm.user_id = $2
 	`
+
 	var m models.TenantMember
+
 	err := r.db.QueryRowContext(ctx, query, tenantID, userID).Scan(
-		&m.TenantID, &m.UserID, &m.Role, &m.CreatedAt,
+		&m.TenantID,
+		&m.TenantName,
+		&m.UserID,
+		&m.Role,
+		&m.CreatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errs.ErrNotFound
 		}
+
 		return nil, errs.RepositoryError(err)
 	}
+
 	return &m, nil
 }
 

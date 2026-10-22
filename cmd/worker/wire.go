@@ -12,18 +12,19 @@ import (
 	"github.com/mtariq99/retrievion/internal/config"
 	"github.com/mtariq99/retrievion/internal/embedding"
 	"github.com/mtariq99/retrievion/internal/ingestion"
+	"github.com/mtariq99/retrievion/internal/notifications"
 	"github.com/mtariq99/retrievion/internal/storage"
 	"github.com/mtariq99/retrievion/internal/tokenizer"
+
 	"github.com/mtariq99/retrievion/pkg/objectstorage"
 )
 
-func InitializeWorker(
-	db *sql.DB,
-	logger *zap.Logger,
-) (*ingestion.Worker, func(), error) {
+func InitializeWorker(db *sql.DB, logger *zap.Logger) (*Workers, func(), error) {
 	wire.Build(
 		config.Load,
-
+		notifications.NewEmailService,
+		notifications.NewInvitationWorker,
+		wire.Struct(new(Workers), "*"),
 		objectstorage.NewB2Storage,
 		storage.NewRabbitMQQueue,
 		storage.ProvideQueue,
@@ -38,9 +39,13 @@ func InitializeWorker(
 		// ingestion
 		ingestion.NewRepository,
 		ingestion.NewPDFParser,
-		wire.Bind(new(ingestion.Parser), new(*ingestion.PDFParser)),
+		ingestion.NewDOCXParser,
+		ingestion.NewParserRegistry,
+		wire.Bind(new(ingestion.Parser), new(*ingestion.ParserRegistry)),
+
 		ingestion.NewParentChildChunker,
 		wire.Bind(new(ingestion.Chunker), new(*ingestion.ParentChildChunker)),
+
 		ingestion.NewPipeline,
 		ingestion.NewWorker,
 	)

@@ -5,50 +5,25 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"errors"
 	"fmt"
-	"math"
-	"math/big"
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/models"
-	"golang.org/x/crypto/bcrypt"
 )
 
-const (
-	salt = 10
-)
-
-func HashPassword(password string) string {
-	hashedPass, err := bcrypt.GenerateFromPassword([]byte(password), salt)
-	if err != nil {
-		panic(err)
+func GenerateToken() (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
 	}
-	return string(hashedPass)
-}
-
-func ComparePassword(hashedPassword, password string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
-	return err == nil
-}
-
-func GenerateRandomState() string {
-	b := make([]byte, 32)
-	rand.Read(b)
-	return base64.URLEncoding.EncodeToString(b)
-}
-
-func GenerateSessionID() string {
-	b := make([]byte, 32)
-	rand.Read(b)
-	return base64.URLEncoding.EncodeToString(b)
+	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
 func GetUserClaims(c *gin.Context) (*models.UserClaims, bool) {
-	userIdVal, exists := c.Get("user_id")
+	userIdVal, exists := c.Get(consts.UserID)
 	if !exists {
 		return nil, false
 	}
@@ -57,7 +32,7 @@ func GetUserClaims(c *gin.Context) (*models.UserClaims, bool) {
 		return nil, false
 	}
 
-	userEmailVal, exists := c.Get("user_email")
+	userEmailVal, exists := c.Get(consts.UserEmail)
 	if !exists {
 		return nil, false
 	}
@@ -66,7 +41,7 @@ func GetUserClaims(c *gin.Context) (*models.UserClaims, bool) {
 		return nil, false
 	}
 
-	opaqueTokenIdVal, exists := c.Get("opaque_token_id")
+	opaqueTokenIdVal, exists := c.Get(consts.OpaqueTokenID)
 	if !exists {
 		return nil, false
 	}
@@ -75,11 +50,27 @@ func GetUserClaims(c *gin.Context) (*models.UserClaims, bool) {
 		return nil, false
 	}
 
-	tenantIdVal, exists := c.Get("tenant_id")
+	tenantIdVal, exists := c.Get(consts.TenantID)
 	if !exists {
 		return nil, false
 	}
 	tenantId, ok := tenantIdVal.(uuid.UUID)
+	if !ok {
+		return nil, false
+	}
+	IsServiceBool, exists := c.Get(consts.IsService)
+	if !exists {
+		return nil, false
+	}
+	IsService, ok := IsServiceBool.(bool)
+	if !ok {
+		return nil, false
+	}
+	clientIDVal, exists := c.Get(consts.ClientID)
+	if !exists {
+		return nil, false
+	}
+	clientID, ok := clientIDVal.(string)
 	if !ok {
 		return nil, false
 	}
@@ -89,31 +80,11 @@ func GetUserClaims(c *gin.Context) (*models.UserClaims, bool) {
 		UserEmail:         userEmail,
 		UserOpaqueTokenId: opaqueTokenId,
 		TenantID:          tenantId,
+		IsService:         IsService,
+		ClientID:          clientID,
 	}
 
 	return claims, true
-}
-
-func ParseStrToInt64(s string) (int64, error) {
-	Id64, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("invalid ID format: %w", err)
-	}
-	return Id64, nil
-}
-
-func ExtractRefreshToken(c *gin.Context) (*string, error) {
-	cookie, err := c.Request.Cookie("refresh-token")
-	if err != nil {
-		return nil, fmt.Errorf("refresh token not found")
-	}
-
-	token := cookie.Value
-	if token == "" {
-		return nil, fmt.Errorf("refresh token is empty")
-	}
-
-	return &token, nil
 }
 
 func HashToken(token string) string {
@@ -121,20 +92,9 @@ func HashToken(token string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-func GenerateOTP() string {
-	n, _ := rand.Int(rand.Reader, big.NewInt(900000))
-	return fmt.Sprintf("%06d", n.Int64()+100000) // always 6 digits: 100000–999999
-}
-
-func ParseInt64(strVal, label string) (int64, error) {
-	if strVal == "" {
-		return 0, fmt.Errorf("%s is required", label)
-	}
-	parsed, err := strconv.ParseInt(strVal, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("invalid %s: must be a number", label)
-	}
-	return parsed, nil
+func HashTokenBytes(token string) []byte {
+	sum := sha256.Sum256([]byte(token))
+	return sum[:]
 }
 
 func ParseUUID(strVal, label string) (uuid.UUID, error) {
@@ -146,105 +106,6 @@ func ParseUUID(strVal, label string) (uuid.UUID, error) {
 		return uuid.Nil, fmt.Errorf("invalid %s: must be a valid UUID", label)
 	}
 	return id, nil
-}
-
-var ErrQuotaExceeded = errors.New("free tier limit reached")
-
-func GetContextUserID(c *gin.Context) (int64, bool) {
-	v, exists := c.Get("user_id")
-	if !exists {
-		return 0, false
-	}
-	id, ok := v.(int64)
-	return id, ok
-}
-
-func ParseIDParam(c *gin.Context) (int64, error) {
-	raw := c.Param("id")
-	if raw == "" {
-		return 0, fmt.Errorf("user ID is required")
-	}
-	id, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("invalid user ID")
-	}
-	return id, nil
-}
-
-func BuildOffsetPagination(page int, limit int, totalItems int64, currentCount int) models.PaginationResponse {
-	totalPages := int(
-		math.Ceil(
-			float64(totalItems) / float64(limit),
-		),
-	)
-
-	hasNext := page < totalPages
-	hasPrevious := page > 1
-
-	var nextPage *int
-	var previousPage *int
-
-	if hasNext {
-		n := page + 1
-		nextPage = &n
-	}
-
-	if hasPrevious {
-		p := page - 1
-		previousPage = &p
-	}
-
-	from := ((page - 1) * limit) + 1
-	to := from + currentCount - 1
-
-	remaining := totalItems - int64(to)
-
-	if remaining < 0 {
-		remaining = 0
-	}
-
-	return models.PaginationResponse{
-		Page:         page,
-		Limit:        limit,
-		TotalItems:   totalItems,
-		TotalPages:   totalPages,
-		CurrentCount: currentCount,
-
-		HasNext:     hasNext,
-		HasPrevious: hasPrevious,
-
-		NextPage:     nextPage,
-		PreviousPage: previousPage,
-
-		RemainingItems: remaining,
-
-		From: from,
-		To:   to,
-	}
-}
-
-func BuildCursorPagination(limit int, currentCount int, nextCursor string) models.PaginationResponse {
-	hasNext := false
-
-	if currentCount == limit {
-		hasNext = true
-	}
-
-	return models.PaginationResponse{
-		Limit:        limit,
-		CurrentCount: currentCount,
-		HasNext:      hasNext,
-		NextCursor:   nextCursor,
-	}
-}
-
-func GetPagination(c *gin.Context) (*models.PaginationQuery, error) {
-	paginationData, exists := c.Get("pagination")
-	if !exists {
-		return nil, fmt.Errorf("pagination does not exists")
-	}
-	pagination := paginationData.(models.PaginationQuery)
-	return &pagination, nil
 }
 
 func UnixToTime(sec int64) time.Time {

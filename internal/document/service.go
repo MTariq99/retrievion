@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
-	"net/http"
 	"path/filepath"
 
 	"github.com/google/uuid"
@@ -16,6 +15,7 @@ import (
 	"github.com/mtariq99/retrievion/internal/auth"
 	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/internal/errs"
+	"github.com/mtariq99/retrievion/internal/filetype"
 	"github.com/mtariq99/retrievion/internal/storage"
 	"github.com/mtariq99/retrievion/models"
 	"github.com/mtariq99/retrievion/pkg/objectstorage"
@@ -38,8 +38,6 @@ type documentReader interface {
 	FindDocument(ctx context.Context, documentID uuid.UUID) (*models.Document, error)
 }
 
-// txRunner lets Service run a set of mutations atomically without
-// depending on the concrete *Repository type.
 type txRunner interface {
 	WithTx(ctx context.Context, fn func(tx documentMutator) error) error
 }
@@ -87,16 +85,11 @@ func (s *Service) UploadDocument(ctx context.Context, userID, tenantID uuid.UUID
 		return nil, fmt.Errorf("open file: %w", err)
 	}
 	defer src.Close()
-	header := make([]byte, 512)
-
-	n, err := io.ReadFull(src, header)
-	if err != nil && err != io.ErrUnexpectedEOF {
-		return nil, fmt.Errorf("read file header: %w", err)
+	mimeType, err := filetype.Detect(src, file.Size)
+	if err != nil {
+		return nil, fmt.Errorf("detect file type: %w", err)
 	}
-
-	mimeType := http.DetectContentType(header[:n])
-
-	if mimeType != "application/pdf" {
+	if mimeType == "" {
 		return nil, errs.ErrUnsupportedFileType
 	}
 
@@ -140,7 +133,7 @@ func (s *Service) UploadDocument(ctx context.Context, userID, tenantID uuid.UUID
 		TenantID: tenantID,
 		Name:     filename,
 		MimeType: mimeType,
-		Status:   models.DocumentStatusPending,
+		Status:   consts.DocumentStatusPending,
 	}
 
 	version := &models.DocumentVersion{
@@ -149,7 +142,7 @@ func (s *Service) UploadDocument(ctx context.Context, userID, tenantID uuid.UUID
 		Version:     1,
 		ContentHash: sha256Hash,
 		StorageKey:  objectKey,
-		Status:      models.DocumentStatusPending,
+		Status:      consts.DocumentStatusPending,
 	}
 
 	job := &models.IngestionJob{

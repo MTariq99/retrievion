@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/internal/errs"
 	"github.com/mtariq99/retrievion/models"
 )
@@ -190,7 +191,7 @@ func (r *Repository) FindByUserID(ctx context.Context, userID, tenantID uuid.UUI
 			tenantID   uuid.UUID
 			name       string
 			mimeType   string
-			status     models.DocumentStatus
+			status     consts.DocumentStatus
 			createdAt  time.Time
 			updatedAt  time.Time
 

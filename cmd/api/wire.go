@@ -11,21 +11,22 @@ import (
 
 	"github.com/mtariq99/retrievion/internal/auth"
 	"github.com/mtariq99/retrievion/internal/chat"
+	"github.com/mtariq99/retrievion/internal/tenants"
+
 	"github.com/mtariq99/retrievion/internal/citation"
 	"github.com/mtariq99/retrievion/internal/conversation"
+	"github.com/mtariq99/retrievion/internal/document"
 	"github.com/mtariq99/retrievion/internal/embedding"
 	"github.com/mtariq99/retrievion/internal/llm"
+	"github.com/mtariq99/retrievion/internal/notifications"
 	"github.com/mtariq99/retrievion/internal/prompt"
 	"github.com/mtariq99/retrievion/internal/retrieval"
 
-	"github.com/mtariq99/retrievion/internal/document"
-
 	"github.com/mtariq99/retrievion/internal/config"
-	"github.com/mtariq99/retrievion/internal/tokenizer"
-
 	httpHandler "github.com/mtariq99/retrievion/internal/http"
 	"github.com/mtariq99/retrievion/internal/middleware"
 	"github.com/mtariq99/retrievion/internal/storage"
+	"github.com/mtariq99/retrievion/internal/tokenizer"
 	"github.com/mtariq99/retrievion/pkg/objectstorage"
 )
 
@@ -35,12 +36,21 @@ func InitializeAPI(
 ) (*httpHandler.Handler, func(), error) {
 	wire.Build(
 		config.Load,
+		notifications.NewEmailService,
 
+		// Infrastructure
 		storage.NewRedis,
 		objectstorage.NewB2Storage,
 		storage.NewRabbitMQQueue,
 		storage.ProvideQueue,
+		wire.Bind(
+			new(tenants.InvitationPublisher),
+			new(*storage.RabbitMQQueue),
+		),
+
 		tokenizer.NewCounter,
+
+		// Authentication
 		auth.NewTokenConfig,
 		auth.NewOpaqueTokenService,
 		auth.NewRepository,
@@ -49,50 +59,73 @@ func InitializeAPI(
 		auth.NewService,
 		auth.NewHandler,
 
-		// documents
+		// Documents
 		document.NewRepository,
 		document.NewService,
 		document.NewHandler,
 
-		// conversation
+		// Conversations
 		conversation.NewRepository,
 		conversation.NewService,
 
-		// retrieval
+		// Retrieval
 		retrieval.NewVectorRepository,
-		wire.Bind(new(retrieval.VectorSearcher), new(*retrieval.VectorRepository)),
+		wire.Bind(
+			new(retrieval.VectorSearcher),
+			new(*retrieval.VectorRepository),
+		),
 		retrieval.NewKeywordRepository,
-		wire.Bind(new(retrieval.KeywordSearcher), new(*retrieval.KeywordRepository)),
+		wire.Bind(
+			new(retrieval.KeywordSearcher),
+			new(*retrieval.KeywordRepository),
+		),
 		retrieval.NewFusion,
-		wire.Bind(new(retrieval.ResultFusion), new(*retrieval.Fusion)),
+		wire.Bind(
+			new(retrieval.ResultFusion),
+			new(*retrieval.Fusion),
+		),
 		retrieval.NewNoopReranker,
-		wire.Bind(new(retrieval.Reranker), new(*retrieval.NoopReranker)),
+		wire.Bind(
+			new(retrieval.Reranker),
+			new(*retrieval.NoopReranker),
+		),
 		retrieval.NewService,
 
-		// prompt
+		// Prompt
 		prompt.NewBuilder,
 
-		// citation
+		// Citation
 		citation.NewService,
 
-		// embedding
+		// Embedding
 		embedding.NewGeminiProvider,
-		wire.Bind(new(embedding.Provider), new(*embedding.GeminiProvider)),
+		wire.Bind(
+			new(embedding.Provider),
+			new(*embedding.GeminiProvider),
+		),
 		embedding.NewService,
 
-		// llm
+		// LLM
 		llm.NewClient,
-		wire.Bind(new(llm.Provider), new(*llm.Client)),
+		wire.Bind(
+			new(llm.Provider),
+			new(*llm.Client),
+		),
 		llm.NewPricing,
 		llm.NewService,
 
-		// chat
+		// Chat
 		chat.NewRepository,
 		chat.NewService,
 		chat.NewHandler,
 
-		middleware.NewPhantomTokenMiddleware,
+		// Tenant invitations
+		tenants.NewTanantRepository,
+		tenants.NewTenantService,
+		tenants.NewTenantHandler,
 
+		// Middleware and HTTP handler
+		middleware.NewPhantomTokenMiddleware,
 		httpHandler.NewHandler,
 	)
 

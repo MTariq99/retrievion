@@ -16,5 +16,5 @@ const (
 )
 
 const (
-	DefaultWorkspace = "Personal workspace"
+	DefaultWorkspace = "workspace"
 )

@@ -5,13 +5,12 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 
 	"github.com/mtariq99/retrievion/models"
 	"github.com/mtariq99/retrievion/pkg/objectstorage"
 )
 
-// EmbeddingProvider matches internal/embedding.Provider (structural match,
-// no import needed unless you want the explicit dependency).
 type EmbeddingProvider interface {
 	Embed(ctx context.Context, texts []string) ([][]float32, error)
 }
@@ -22,10 +21,14 @@ type Pipeline struct {
 	parser   Parser
 	chunker  Chunker
 	embedder EmbeddingProvider
+	logger   *zap.Logger
 }
 
-func NewPipeline(repo *Repository, storage objectstorage.Storage, parser Parser, chunker Chunker, embedder EmbeddingProvider) *Pipeline {
-	return &Pipeline{repo: repo, storage: storage, parser: parser, chunker: chunker, embedder: embedder}
+func NewPipeline(repo *Repository, storage objectstorage.Storage, parser Parser, chunker Chunker, embedder EmbeddingProvider, logger *zap.Logger) *Pipeline {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	return &Pipeline{repo: repo, storage: storage, parser: parser, chunker: chunker, embedder: embedder, logger: logger}
 }
 
 func (p *Pipeline) Process(ctx context.Context, job models.Job) error {
@@ -48,6 +51,9 @@ func (p *Pipeline) Process(ctx context.Context, job models.Job) error {
 	parsed, err := p.parser.Parse(ctx, obj, version.MimeType)
 	if err != nil {
 		return p.fail(ctx, job.JobID, fmt.Errorf("parse document: %w", err))
+	}
+	for _, w := range parsed.Warnings {
+		p.logger.Warn("document parsed with warnings", zap.String("job_id", job.JobID.String()), zap.String("warning", w))
 	}
 
 	chunks, err := p.chunker.Chunk(ctx, parsed, job.DocumentVersionID)

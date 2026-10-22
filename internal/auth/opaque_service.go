@@ -169,7 +169,6 @@ func getUserRole(user *models.User) string {
 	return string(user.Role)
 }
 
-// keep strconv import used — remove if RevokeAllUserTokens no longer needs it
 var _ = strconv.FormatInt
 
 func (s *OpaqueTokenService) GenerateServiceToken(ctx context.Context, clientID string, tenantID uuid.UUID) (string, time.Time, error) {

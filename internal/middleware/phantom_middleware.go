@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/mtariq99/retrievion/internal/auth"
+	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/models"
 	"go.uber.org/zap"
 )
@@ -82,13 +83,13 @@ func (m *PhantomTokenMiddleware) ExchangeOpaqueForJWT() gin.HandlerFunc {
 			return
 		}
 
-		c.Request.Header.Set("Authorization", "Bearer "+jwtToken)
-		c.Set("opaque_token_id", opaqueToken)
-		c.Set("user_id", introspection.UserID)
-		c.Set("user_email", introspection.UserEmail)
-		c.Set("tenant_id", introspection.TenantID)
-		c.Set("is_service", introspection.IsService)
-		c.Set("client_id", introspection.ClientID)
+		c.Request.Header.Set(consts.Authorization, "Bearer "+jwtToken)
+		c.Set(consts.OpaqueTokenID, opaqueToken)
+		c.Set(consts.UserID, introspection.UserID)
+		c.Set(consts.UserEmail, introspection.UserEmail)
+		c.Set(consts.TenantID, introspection.TenantID)
+		c.Set(consts.IsService, introspection.IsService)
+		c.Set(consts.ClientID, introspection.ClientID)
 
 		c.Next()
 	}
@@ -101,8 +102,8 @@ func (m *PhantomTokenMiddleware) generateInternalJWT(introspection *models.Intro
 		UserName:  introspection.UserName,
 		Scopes:    introspection.Scopes,
 		TenantID:  introspection.TenantID,
-		IsService: introspection.IsService, // new
-		ClientID:  introspection.ClientID,  // new
+		IsService: introspection.IsService,
+		ClientID:  introspection.ClientID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(5 * time.Minute)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

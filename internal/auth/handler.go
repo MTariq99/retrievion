@@ -30,7 +30,6 @@ func NewHandler(tokenService *OpaqueTokenService, service *Service, cfg *models.
 	}
 }
 
-// POST /api/v1/auth/register
 func (h *Handler) CreateUser(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
 	defer cancel()
@@ -55,7 +54,6 @@ func (h *Handler) CreateUser(c *gin.Context) {
 	response.WriteSuccessResponse(c, "user created successfully", payload)
 }
 
-// POST /api/v1/auth/login
 func (h *Handler) Login(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
 	defer cancel()
@@ -78,9 +76,6 @@ func (h *Handler) Login(c *gin.Context) {
 	response.WriteSuccessResponse(c, "login successful", loginResp)
 }
 
-// GET /api/v1/auth/me
-// Requires middleware.AuthMiddleware to run first — it's what
-// populates "user_id" in the gin context below.
 func (h *Handler) Me(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
 	defer cancel()

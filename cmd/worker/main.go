@@ -5,12 +5,12 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/mtariq99/retrievion/internal/config"
 	"github.com/mtariq99/retrievion/internal/storage"
@@ -36,7 +36,7 @@ func main() {
 	}
 	defer db.Close()
 
-	worker, cleanup, err := InitializeWorker(db, logger)
+	workers, cleanup, err := InitializeWorker(db, logger)
 	if err != nil {
 		logger.Fatal("wire init failed", zap.Error(err))
 	}
@@ -45,40 +45,35 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-	runErrCh := make(chan error, 1)
-
-	go func() {
-		defer wg.Done()
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
 		logger.Info("ingestion worker starting", zap.String("env", cfg.App.Env))
-		if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			runErrCh <- err
-			return
-		}
-		runErrCh <- nil
-	}()
+		return workers.Ingestion.Run(gctx)
+	})
+	g.Go(func() error {
+		return workers.Invitations.Run(gctx)
+	})
 
-	<-ctx.Done()
-	logger.Info("shutdown signal received, draining in-flight jobs...")
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-	defer cancel()
-
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
+	errCh := make(chan error, 1)
+	go func() { errCh <- g.Wait() }()
 
 	select {
-	case <-done:
-		if err := <-runErrCh; err != nil {
+	case err := <-errCh: // a worker stopped on its own
+		if err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("worker exited with error", zap.Error(err))
 			os.Exit(1)
 		}
-		logger.Info("worker exited cleanly")
-	case <-shutdownCtx.Done():
-		logger.Warn("forced shutdown after timeout; in-flight job may be requeued")
+	case <-ctx.Done():
+		logger.Info("shutdown signal received, draining in-flight jobs...")
+		select {
+		case err := <-errCh:
+			if err != nil && !errors.Is(err, context.Canceled) {
+				logger.Error("worker exited with error", zap.Error(err))
+				os.Exit(1)
+			}
+			logger.Info("worker exited cleanly")
+		case <-time.After(shutdownTimeout):
+			logger.Warn("forced shutdown after timeout; in-flight jobs may be redelivered")
+		}
 	}
 }

@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -84,10 +85,11 @@ func (s *Service) Register(ctx context.Context, req models.RegisterRequest) (*mo
 		Name:         req.Name,
 		Role:         enums.RoleUser,
 	}
-	if req.TenantName == "" {
-		req.TenantName = enums.DefaultWorkspace
+	TenantName, err := CreateTenantName(req.Name)
+	if err != nil {
+		TenantName = enums.DefaultWorkspace
 	}
-	tenant, err := s.userWriter.CreateUserWithTenant(ctx, user, req.TenantName)
+	tenant, err := s.userWriter.CreateUserWithTenant(ctx, user, TenantName)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -154,4 +156,11 @@ func (s *Service) GetUserTenants(ctx context.Context, userID uuid.UUID) ([]model
 
 func (s *Service) GetMembership(ctx context.Context, tenantID, userID uuid.UUID) (*models.TenantMember, error) {
 	return s.membership.GetMembership(ctx, tenantID, userID)
+}
+
+func CreateTenantName(userName string) (string, error) {
+	if userName == "" {
+		return "", errs.ErrMissingUserName
+	}
+	return strings.ToUpper(userName[:1]) + userName[1:] + "'s " + strings.ToUpper(enums.DefaultWorkspace[:1]) + enums.DefaultWorkspace[1:], nil
 }

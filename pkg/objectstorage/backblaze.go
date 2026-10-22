@@ -54,7 +54,7 @@ func (b *B2Storage) Download(ctx context.Context, key string) (io.ReadCloser, er
 		Key:    &key,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", "failed to download", err)
+		return nil, fmt.Errorf("%s: %v", "failed to download", err)
 	}
 
 	return out.Body, nil

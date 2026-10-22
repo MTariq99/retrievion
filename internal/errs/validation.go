@@ -40,4 +40,8 @@ var (
 	ErrMissingMessage        = errors.New("message is required")
 	ErrInvalidMessage        = errors.New("invalid message")
 	ErrInvalidTitle          = errors.New("conversation title must be provided")
+	ErrInvalidInvitation     = errors.New("atleast one invitation is required")
+	ErrInvalidTenantID       = errors.New("invalid tenant id")
+	ErrTenantIDRequired      = errors.New("tenant ID is required")
+	ErrGenerateToken         = errors.New("error generating token")
 )

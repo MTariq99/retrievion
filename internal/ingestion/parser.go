@@ -1,14 +1,13 @@
 package ingestion
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"strings"
 
-	"github.com/ledongthuc/pdf" // swap for your preferred PDF lib if different
-
+	"github.com/mtariq99/retrievion/internal/consts"
+	"github.com/mtariq99/retrievion/internal/errs"
 	"github.com/mtariq99/retrievion/models"
 )
 
@@ -16,64 +15,34 @@ type Parser interface {
 	Parse(ctx context.Context, r io.Reader, mimeType string) (*models.ParsedDocument, error)
 }
 
-type PDFParser struct{}
-
-func NewPDFParser() *PDFParser {
-	return &PDFParser{}
+type ParserRegistry struct {
+	parsers map[string]Parser
 }
 
-func (p *PDFParser) Parse(ctx context.Context, r io.Reader, mimeType string) (*models.ParsedDocument, error) {
-	if mimeType != "application/pdf" {
-		return nil, fmt.Errorf("unsupported mime type for parser: %s", mimeType)
-	}
+func NewParserRegistry(pdf *PDFParser, docx *DOCXParser) *ParserRegistry {
+	return &ParserRegistry{parsers: map[string]Parser{
+		consts.PdfMIME:  pdf,
+		consts.DocxMIME: docx,
+	}}
+}
 
-	data, err := io.ReadAll(r)
+func (r *ParserRegistry) Parse(ctx context.Context, rd io.Reader, mimeType string) (*models.ParsedDocument, error) {
+	p, ok := r.parsers[strings.ToLower(strings.TrimSpace(mimeType))]
+	if !ok {
+		return nil, fmt.Errorf("%w: no parser for %q", errs.ErrUnsupportedFileType, mimeType)
+	}
+	return p.Parse(ctx, rd, mimeType)
+}
+
+func readAllLimited(r io.Reader, max int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, max+1))
 	if err != nil {
-		return nil, fmt.Errorf("read pdf bytes: %w", err)
+		return nil, fmt.Errorf("read document: %w", err)
 	}
-
-	reader, err := pdf.NewReader(bytes.NewReader(data), int64(len(data)))
-	if err != nil {
-		return nil, fmt.Errorf("open pdf: %w", err)
+	if int64(len(data)) > max {
+		return nil, fmt.Errorf("%w: input exceeds %d bytes", errs.ErrDocumentTooLarge, max)
 	}
-
-	doc := &models.ParsedDocument{}
-	var full strings.Builder
-
-	numPages := reader.NumPage()
-	for i := 1; i <= numPages; i++ {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-
-		page := reader.Page(i)
-		if page.V.IsNull() {
-			continue
-		}
-
-		text, err := page.GetPlainText(nil)
-		if err != nil {
-			continue // skip unreadable pages rather than failing the whole document
-		}
-
-		text = normalizeText(text)
-		if text == "" {
-			continue
-		}
-
-		doc.Pages = append(doc.Pages, models.Page{Number: i, Content: text})
-		full.WriteString(text)
-		full.WriteString("\n\n")
-	}
-
-	if len(doc.Pages) == 0 {
-		return nil, fmt.Errorf("no extractable text found in pdf")
-	}
-
-	doc.Content = full.String()
-	return doc, nil
+	return data, nil
 }
 
 func normalizeText(s string) string {

@@ -15,6 +15,7 @@ const (
 	maxChildTokens  = 700
 	minChildTokens  = 50
 	overlapFraction = 0.15
+	maxParentTokens = 2000
 )
 
 type Chunker interface {
@@ -31,72 +32,115 @@ func NewParentChildChunker(t tokenizer.Counter) *ParentChildChunker {
 	}
 }
 
-func (c *ParentChildChunker) Chunk(
-	ctx context.Context,
-	doc *models.ParsedDocument,
-	versionID uuid.UUID,
-) ([]models.Chunk, error) {
+func (c *ParentChildChunker) Chunk(ctx context.Context, doc *models.ParsedDocument, versionID uuid.UUID) ([]models.Chunk, error) {
 	var chunks []models.Chunk
 	index := 0
+	seenParents := make(map[string]bool)
 
-	for _, page := range doc.Pages {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
+	for _, section := range doc.Sections {
+		page := 0
+		if section.Page != nil {
+			page = *section.Page
 		}
 
-		if strings.TrimSpace(page.Content) == "" {
-			continue
-		}
+		for _, parentText := range c.splitParents(section.Content) {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			default:
+			}
 
-		// Parent = complete page.
-		parentID := uuid.New()
-
-		chunks = append(chunks, models.Chunk{
-			ID:                parentID,
-			DocumentVersionID: versionID,
-			Content:           page.Content,
-			ContentHash:       hashContent(page.Content),
-			Page:              page.Number,
-			ChunkIndex:        index,
-			TokenCount:        c.tokenizer.Count(page.Content),
-			IsParent:          true,
-		})
-
-		index++
-
-		// Children = smaller pieces of the page.
-		paragraphs := splitParagraphs(page.Content)
-
-		children := splitIntoTokenBounds(paragraphs, maxChildTokens, minChildTokens, overlapFraction, c.tokenizer)
-
-		for _, child := range children {
-			child = strings.TrimSpace(child)
-
-			if child == "" {
+			if strings.TrimSpace(parentText) == "" {
 				continue
 			}
 
-			pid := parentID
+			parentHash := hashContent(parentText)
+			if seenParents[parentHash] {
+				continue
+			}
+			seenParents[parentHash] = true
+
+			parentID := uuid.New()
 
 			chunks = append(chunks, models.Chunk{
-				ID:                uuid.New(),
-				ParentChunkID:     &pid,
+				ID:                parentID,
 				DocumentVersionID: versionID,
-				Content:           child,
-				ContentHash:       hashContent(child),
-				Page:              page.Number,
+				Content:           parentText,
+				ContentHash:       parentHash,
+				Page:              page,
+				Section:           section.Title,
 				ChunkIndex:        index,
-				TokenCount:        c.tokenizer.Count(child),
-				IsParent:          false,
+				TokenCount:        c.tokenizer.Count(parentText),
+				IsParent:          true,
 			})
 
 			index++
+
+			paragraphs := splitParagraphs(parentText)
+
+			children := splitIntoTokenBounds(paragraphs, maxChildTokens, minChildTokens, overlapFraction, c.tokenizer)
+
+			seenChildren := make(map[string]bool)
+
+			for _, child := range children {
+				child = strings.TrimSpace(child)
+
+				if child == "" {
+					continue
+				}
+
+				childHash := hashContent(child)
+				if seenChildren[childHash] {
+					continue
+				}
+				seenChildren[childHash] = true
+
+				pid := parentID
+
+				chunks = append(chunks, models.Chunk{
+					ID:                uuid.New(),
+					ParentChunkID:     &pid,
+					DocumentVersionID: versionID,
+					Content:           child,
+					ContentHash:       childHash,
+					Page:              page,
+					Section:           section.Title,
+					ChunkIndex:        index,
+					TokenCount:        c.tokenizer.Count(child),
+					IsParent:          false,
+				})
+
+				index++
+			}
 		}
 	}
 
 	return chunks, nil
+}
+
+func (c *ParentChildChunker) splitParents(content string) []string {
+	if c.tokenizer.Count(content) <= maxParentTokens {
+		return []string{content}
+	}
+
+	var (
+		parents []string
+		current []string
+		tokens  int
+	)
+	for _, p := range splitParagraphs(content) {
+		t := c.tokenizer.Count(p)
+		if tokens+t > maxParentTokens && len(current) > 0 {
+			parents = append(parents, strings.Join(current, "\n"))
+			current, tokens = nil, 0
+		}
+		current = append(current, p)
+		tokens += t
+	}
+	if len(current) > 0 {
+		parents = append(parents, strings.Join(current, "\n"))
+	}
+	return parents
 }
 
 func splitParagraphs(text string) []string {
@@ -133,16 +177,12 @@ func splitIntoTokenBounds(paragraphs []string, maxTokens int, minTokens int, ove
 		for end < len(paragraphs) {
 			paragraph := paragraphs[end]
 			tokens := counter.Count(paragraph)
-
-			// A single paragraph is larger than the maximum.
 			if tokens > maxTokens {
 				if len(current) > 0 {
 					chunks = appendChunk(chunks, strings.Join(current, "\n"), minTokens, counter)
 					current = nil
 					currentTokens = 0
 				}
-
-				// Split the oversized paragraph.
 				largeParts := splitLargeText(paragraph, maxTokens, counter)
 
 				for _, part := range largeParts {
@@ -156,7 +196,6 @@ func splitIntoTokenBounds(paragraphs []string, maxTokens int, minTokens int, ove
 				break
 			}
 
-			// Adding this paragraph would exceed maxTokens.
 			if currentTokens+tokens > maxTokens && len(current) > 0 {
 				break
 			}
@@ -166,7 +205,6 @@ func splitIntoTokenBounds(paragraphs []string, maxTokens int, minTokens int, ove
 			end++
 		}
 
-		// We consumed an oversized paragraph.
 		if len(current) == 0 {
 			continue
 		}
@@ -174,8 +212,6 @@ func splitIntoTokenBounds(paragraphs []string, maxTokens int, minTokens int, ove
 		chunk := strings.Join(current, "\n")
 
 		chunks = appendChunk(chunks, chunk, minTokens, counter)
-
-		// Calculate paragraph overlap.
 		overlapCount := int(float64(len(current)) * overlap)
 
 		if overlapCount > 0 && end < len(paragraphs) {
