@@ -73,25 +73,25 @@ func ProvideQueue(q *RabbitMQQueue) Queue {
 func (q *RabbitMQQueue) declareTopology() error {
 	// 1. Declare the dead-letter exchange first
 	if err := q.channel.ExchangeDeclare(
-		consts.DeadLetterExchange, // name
-		"direct",                  // type
-		true,                      // durable
-		false,                     // auto deleted
-		false,                     // internal
-		false,                     // no wait
-		nil,                       // args
+		consts.IngestionDeadLetterExchangeName, // name
+		"direct",                               // type
+		true,                                   // durable
+		false,                                  // auto deleted
+		false,                                  // internal
+		false,                                  // no wait
+		nil,                                    // args
 
 	); err != nil {
 		return fmt.Errorf("declare dead-letter exchange: %w", err)
 	}
 	// 2. Declare the dead-letter queue
 	dld, err := q.channel.QueueDeclare(
-		consts.DeadLetterQueue, // name
-		true,                   // durable
-		false,                  // delete when un used
-		false,                  // exclusive
-		false,                  // no wait
-		nil,                    // args
+		consts.IngestionDeadLetterQueueName, // name
+		true,                                // durable
+		false,                               // delete when un used
+		false,                               // exclusive
+		false,                               // no wait
+		nil,                                 // args
 
 	)
 	if err != nil {
@@ -100,8 +100,8 @@ func (q *RabbitMQQueue) declareTopology() error {
 	// 3. Bind dead-letter queue to dead-letter exchange
 	if err := q.channel.QueueBind(
 		dld.Name,
-		consts.DeadLetterRoutingKey,
-		consts.DeadLetterExchange,
+		consts.IngestionDeadLetterRoutingKey,
+		consts.IngestionDeadLetterExchangeName,
 		false,
 		nil,
 	); err != nil {
@@ -110,7 +110,7 @@ func (q *RabbitMQQueue) declareTopology() error {
 
 	// 4. Declare the main exchange
 	if err := q.channel.ExchangeDeclare(
-		consts.IngestionExchange,
+		consts.IngestionExchangeName,
 		"direct",
 		true,
 		false,
@@ -122,13 +122,11 @@ func (q *RabbitMQQueue) declareTopology() error {
 	}
 	// 5. Declare the main queue, wired to dead-letter on Nack/expiry
 	mainQueueArgs := amqp.Table{
-		"x-dead-letter-exchange":    consts.DeadLetterExchange,
-		"x-dead-letter-routing-key": consts.DeadLetterRoutingKey,
-		// Optional: cap how long a message can live before being dead-lettered
-		// "x-message-ttl": int32(24 * 60 * 60 * 1000), // 24h in ms
+		"x-dead-letter-exchange":    consts.IngestionDeadLetterExchangeName,
+		"x-dead-letter-routing-key": consts.IngestionDeadLetterRoutingKey,
 	}
 	mainQueue, err := q.channel.QueueDeclare(
-		consts.IngestionQueue,
+		consts.IngestionQueueName,
 		true,          // durable
 		false,         // delete when unused
 		false,         // exclusive
@@ -142,7 +140,7 @@ func (q *RabbitMQQueue) declareTopology() error {
 	if err := q.channel.QueueBind(
 		mainQueue.Name,
 		consts.IngestionRoutingKey,
-		consts.IngestionExchange,
+		consts.IngestionExchangeName,
 		false,
 		nil,
 	); err != nil {
@@ -199,7 +197,7 @@ func (q *RabbitMQQueue) declareInvitationTopology() error {
 func (q *RabbitMQQueue) Publish(ctx context.Context, routingKey string, body []byte) error {
 	return q.channel.PublishWithContext(
 		ctx,
-		consts.IngestionExchange,
+		consts.IngestionExchangeName,
 		routingKey,
 		false, // mandatory
 		false, // immediate

@@ -18,7 +18,5 @@ var (
 	ErrEmptyFile                = errors.New("document is empty")
 	ErrInvalidFilename          = errors.New("invalid file name")
 	ErrDuplicateDocument        = errors.New("duplicate document")
-	ErrEmptyInput               = errors.New("embedding: no texts provided")
-	ErrDimensionMismatch        = errors.New("embedding: returned vector count does not match input count")
 	ErrDocumentCorrupt          = errors.New("document is corrupt or malformed")
 )

@@ -1,4 +1,3 @@
-// internal/evaluation/retrieval.go
 package evaluation
 
 import (

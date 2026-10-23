@@ -14,16 +14,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang-migrate/migrate/v4"
+	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/models"
-)
-
-const (
-	driverName             = "postgres"
-	defaultDatabase        = "postgres"
-	connectionTimeout      = 10 * time.Second
-	defaultMaxOpenConns    = 50
-	defaultMaxIdleConns    = 10
-	defaultConnMaxLifetime = 5 * time.Minute
 )
 
 func InitDB(cfg *models.Config, logger *zap.Logger) (*sql.DB, error) {
@@ -41,14 +33,14 @@ func InitDB(cfg *models.Config, logger *zap.Logger) (*sql.DB, error) {
 		return nil, fmt.Errorf("ensure database exists: %w", err)
 	}
 
-	db, err := sql.Open(driverName, dsn)
+	db, err := sql.Open(consts.DriverName, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open postgres connection: %w", err)
 	}
 
 	setConnectionPoolConfig(db, cfg, logger)
 
-	ctx, cancel := context.WithTimeout(context.Background(), connectionTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), consts.ConnectionTimeout)
 	defer cancel()
 
 	if err := db.PingContext(ctx); err != nil {
@@ -102,12 +94,12 @@ func RunMigrations(db *sql.DB, migrationPath string, logger *zap.Logger) error {
 func setConnectionPoolConfig(db *sql.DB, cfg *models.Config, logger *zap.Logger) {
 	maxOpen := cfg.Database.MaxOpenConns
 	if maxOpen <= 0 {
-		maxOpen = defaultMaxOpenConns
+		maxOpen = consts.DefaultMaxOpenConns
 	}
 
 	maxIdle := cfg.Database.MaxIdleConns
 	if maxIdle <= 0 {
-		maxIdle = defaultMaxIdleConns
+		maxIdle = consts.DefaultMaxIdleConns
 	}
 	if maxIdle > maxOpen {
 		logger.Warn("max_idle_conns exceeds max_open_conns, clamping",
@@ -117,14 +109,14 @@ func setConnectionPoolConfig(db *sql.DB, cfg *models.Config, logger *zap.Logger)
 
 	db.SetMaxOpenConns(maxOpen)
 	db.SetMaxIdleConns(maxIdle)
-	db.SetConnMaxLifetime(defaultConnMaxLifetime)
+	db.SetConnMaxLifetime(consts.DefaultConnMaxLifetime)
 	db.SetConnMaxIdleTime(5 * time.Minute)
 
 	logger.Info(
 		"postgres pool configured",
 		zap.Int("max_open", maxOpen),
 		zap.Int("max_idle", maxIdle),
-		zap.Duration("conn_max_lifetime", defaultConnMaxLifetime),
+		zap.Duration("conn_max_lifetime", consts.DefaultConnMaxLifetime),
 	)
 }
 
@@ -138,18 +130,18 @@ func ensureDatabaseExists(dsn string, logger *zap.Logger) error {
 		return errors.New("database name is empty in DSN")
 	}
 
-	defaultDSN, err := replaceDatabaseInDSN(dsn, defaultDatabase)
+	defaultDSN, err := replaceDatabaseInDSN(dsn, consts.DefaultDatabase)
 	if err != nil {
 		return errors.Wrap(err, "failed to create default database DSN")
 	}
 
-	db, err := sql.Open(driverName, defaultDSN)
+	db, err := sql.Open(consts.DriverName, defaultDSN)
 	if err != nil {
 		return errors.Wrap(err, "failed to connect to default postgres database")
 	}
 	defer db.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), connectionTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), consts.ConnectionTimeout)
 	defer cancel()
 
 	if err := db.PingContext(ctx); err != nil {

@@ -7,15 +7,25 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/models"
 )
 
 type VectorRepository struct {
 	db *sql.DB
 }
+type KeywordRepository struct {
+	db *sql.DB
+}
 
 func NewVectorRepository(db *sql.DB) *VectorRepository {
 	return &VectorRepository{
+		db: db,
+	}
+}
+
+func NewKeywordRepository(db *sql.DB) *KeywordRepository {
+	return &KeywordRepository{
 		db: db,
 	}
 }
@@ -40,7 +50,7 @@ func (r *VectorRepository) Search(ctx context.Context, tenantID uuid.UUID, userI
 			dc.tenant_id = $2
 			AND dc.embedding IS NOT NULL
 			AND d.deleted_at IS NULL
-			AND dv.status = 'active'
+			AND dv.status = $4
 		ORDER BY dc.embedding <=> $1::vector
 		LIMIT $3
 	`
@@ -53,6 +63,7 @@ func (r *VectorRepository) Search(ctx context.Context, tenantID uuid.UUID, userI
 		embedding,
 		tenantID,
 		limit,
+		consts.DocumentStatusActive,
 	)
 	if err != nil {
 		return nil, err
@@ -78,7 +89,6 @@ func (r *VectorRepository) Search(ctx context.Context, tenantID uuid.UUID, userI
 		}
 
 		chunk.VectorScore = chunk.Score
-
 		results = append(results, chunk)
 	}
 
@@ -87,16 +97,6 @@ func (r *VectorRepository) Search(ctx context.Context, tenantID uuid.UUID, userI
 	}
 
 	return results, nil
-}
-
-type KeywordRepository struct {
-	db *sql.DB
-}
-
-func NewKeywordRepository(db *sql.DB) *KeywordRepository {
-	return &KeywordRepository{
-		db: db,
-	}
 }
 
 func (r *KeywordRepository) Search(ctx context.Context, tenantID uuid.UUID, userID uuid.UUID, queryText string, limit int) ([]models.RetrievedChunk, error) {
@@ -120,7 +120,7 @@ func (r *KeywordRepository) Search(ctx context.Context, tenantID uuid.UUID, user
 		WHERE
 			dc.tenant_id = $2
 			AND d.deleted_at IS NULL
-			AND dv.status = 'active'
+			AND dv.status = $4
 			AND to_tsvector(
 				'english',
 				dc.content
@@ -138,6 +138,7 @@ func (r *KeywordRepository) Search(ctx context.Context, tenantID uuid.UUID, user
 		queryText,
 		tenantID,
 		limit,
+		consts.DocumentStatusActive,
 	)
 	if err != nil {
 		return nil, err
@@ -162,7 +163,6 @@ func (r *KeywordRepository) Search(ctx context.Context, tenantID uuid.UUID, user
 		}
 
 		chunk.KeywordScore = chunk.Score
-
 		results = append(results, chunk)
 	}
 

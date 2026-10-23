@@ -31,12 +31,6 @@ func NewRedis(cfg *models.Config) (*RedisClient, error) {
 	return &RedisClient{client: client}, nil
 }
 
-// resolveRedisOptions prefers an explicit REDIS_ADDR (plus REDIS_PASSWORD/
-// REDIS_DB) when set, since that's the more specific configuration. When
-// REDIS_ADDR is empty — the normal case, since .env only sets REDIS_URL —
-// it parses REDIS_URL instead, rather than falling through to go-redis's
-// localhost:6379 default, which is wrong inside Docker where Redis is
-// reachable only at the "redis" service hostname.
 func resolveRedisOptions(cfg *models.Config) (*redis.Options, error) {
 	if cfg.Redis.Addr != "" {
 		return &redis.Options{
@@ -101,13 +95,6 @@ func (r *RedisClient) Delete(ctx context.Context, keys ...string) error {
 	return nil
 }
 
-// IncrByFloat atomically increments a numeric key by delta and returns
-// the NEW total. This MUST be atomic — a read-then-write using
-// Load()+Store() would have a race window between two concurrent
-// requests both reading the same "before" value (exactly the kind of
-// race Retrievion's approval-locking already guards against elsewhere
-// with SELECT ... FOR UPDATE; Redis's INCRBYFLOAT is the equivalent
-// atomic primitive for a counter instead of a row).
 func (r *RedisClient) IncrByFloat(ctx context.Context, key string, delta float64) (float64, error) {
 	total, err := r.client.IncrByFloat(ctx, key, delta).Result()
 	if err != nil {
@@ -116,12 +103,6 @@ func (r *RedisClient) IncrByFloat(ctx context.Context, key string, delta float64
 	return total, nil
 }
 
-// GetFloat reads a numeric counter, returning 0 (not an error) if the
-// key doesn't exist yet — a user's first request of the day has no
-// prior spend recorded, and that's a normal state, not a failure.
-// This differs deliberately from your Load()'s redis.Nil pass-through:
-// budget checks want "no spend yet" to behave as 0, not as an error
-// callers have to special-case every time.
 func (r *RedisClient) GetFloat(ctx context.Context, key string) (float64, error) {
 	val, err := r.client.Get(ctx, key).Float64()
 	if err == redis.Nil {
@@ -134,8 +115,6 @@ func (r *RedisClient) GetFloat(ctx context.Context, key string) (float64, error)
 	return val, nil
 }
 
-// Expire sets a TTL on an existing key — used so daily cost counters
-// clean themselves up automatically rather than accumulating forever.
 func (r *RedisClient) Expire(ctx context.Context, key string, ttl time.Duration) error {
 	if err := r.client.Expire(ctx, key, ttl).Err(); err != nil {
 		return fmt.Errorf("redis expire [%s]: %w", key, err)

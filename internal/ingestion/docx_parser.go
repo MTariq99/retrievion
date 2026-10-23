@@ -21,12 +21,6 @@ import (
 	"github.com/mtariq99/retrievion/models"
 )
 
-const (
-	nsWordTransitional = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-	nsWordStrict       = "http://purl.oclc.org/ooxml/wordprocessingml/main"
-	nsMC               = "http://schemas.openxmlformats.org/markup-compatibility/2006"
-)
-
 type DOCXOptions struct {
 	MaxInputBytes  int64
 	MaxEntries     int
@@ -55,7 +49,7 @@ func NewDOCXParserWithOptions(o DOCXOptions) *DOCXParser {
 }
 
 func (p *DOCXParser) Parse(ctx context.Context, r io.Reader, mimeType string) (doc *models.ParsedDocument, err error) {
-	if mimeType != consts.DocxMIME {
+	if mimeType != consts.DOCXMIME {
 		return nil, fmt.Errorf("%w: docx parser received %q", errs.ErrUnsupportedFileType, mimeType)
 	}
 	if err := ctx.Err(); err != nil {
@@ -164,20 +158,19 @@ func (x *docxExtraction) newDecoder(f *zip.File) (*xml.Decoder, io.Closer, error
 }
 
 func (x *docxExtraction) mainPartName() string {
-	const fallback = "word/document.xml"
 	f := x.files["_rels/.rels"]
 	if f == nil {
-		return fallback
+		return consts.DefaultDOCXMainPart
 	}
 	dec, closer, err := x.newDecoder(f)
 	if err != nil {
-		return fallback
+		return consts.DefaultDOCXMainPart
 	}
 	defer closer.Close()
 	for {
 		tok, err := dec.Token()
 		if err != nil {
-			return fallback
+			return consts.DefaultDOCXMainPart
 		}
 		se, ok := tok.(xml.StartElement)
 		if !ok || se.Name.Local != "Relationship" {
@@ -229,7 +222,7 @@ func (x *docxExtraction) withHeadersFooters(body []docxBlock, styles *styleTable
 					continue
 				}
 				seen[b.text] = true
-				b.kind, b.level, b.styled = kindParagraph, 0, false
+				b.kind, b.level, b.styled = consts.KindParagraph, 0, false
 				out = append(out, b)
 			}
 		}
@@ -369,16 +362,8 @@ func headingNameLevel(name string) int {
 	return n
 }
 
-type blockKind uint8
-
-const (
-	kindParagraph blockKind = iota
-	kindHeading
-	kindListItem
-)
-
 type docxBlock struct {
-	kind    blockKind
+	kind    consts.BlockKind
 	level   int
 	text    string
 	allBold bool
@@ -446,7 +431,7 @@ func (x *docxExtraction) walk(f *zip.File, styles *styleTable) ([]docxBlock, err
 
 		switch t := tok.(type) {
 		case xml.StartElement:
-			if t.Name.Space == nsMC && t.Name.Local == "Fallback" {
+			if t.Name.Space == consts.NsMC && t.Name.Local == "Fallback" {
 				if err := dec.Skip(); err != nil {
 					return nil, err
 				}
@@ -615,9 +600,9 @@ func finishParagraph(p *paraState, styles *styleTable) (docxBlock, bool) {
 	oneLine := strings.Join(lines, " ")
 	switch {
 	case level > 0 && utf8.RuneCountInString(oneLine) <= consts.MaxHeadingRunes:
-		b.kind, b.level, b.text, b.styled = kindHeading, level, oneLine, !weak
+		b.kind, b.level, b.text, b.styled = consts.KindHeading, level, oneLine, !weak
 	case p.numbered || styles.isList(p.style):
-		b.kind = kindListItem
+		b.kind = consts.KindListItem
 	}
 	return b, true
 }
@@ -664,7 +649,7 @@ func renderTable(t *tableState) []docxBlock {
 			for _, c := range cells {
 				parts = append(parts, strings.ReplaceAll(c[0].text, "\n", " "))
 			}
-			out = append(out, docxBlock{kind: kindParagraph, text: strings.Join(parts, " | ")})
+			out = append(out, docxBlock{kind: consts.KindParagraph, text: strings.Join(parts, " | ")})
 		default:
 			for _, c := range cells {
 				out = append(out, c...)
@@ -676,7 +661,7 @@ func renderTable(t *tableState) []docxBlock {
 
 func rowIsCompact(cells [][]docxBlock) bool {
 	for _, c := range cells {
-		if len(c) > 1 || c[0].kind == kindHeading {
+		if len(c) > 1 || c[0].kind == consts.KindHeading {
 			return false
 		}
 	}
@@ -697,13 +682,13 @@ var resumeSectionNames = map[string]bool{
 
 func applyHeadingHeuristics(blocks []docxBlock) {
 	for _, b := range blocks {
-		if b.kind == kindHeading && b.styled {
+		if b.kind == consts.KindHeading && b.styled {
 			return
 		}
 	}
 	for i := range blocks {
-		if blocks[i].kind == kindParagraph && looksLikeSectionHeading(blocks[i]) {
-			blocks[i].kind, blocks[i].level = kindHeading, 1
+		if blocks[i].kind == consts.KindParagraph && looksLikeSectionHeading(blocks[i]) {
+			blocks[i].kind, blocks[i].level = consts.KindHeading, 1
 		}
 	}
 }
@@ -761,7 +746,7 @@ func buildSections(blocks []docxBlock) []models.Section {
 	}
 
 	for _, b := range blocks {
-		if b.kind != kindHeading {
+		if b.kind != consts.KindHeading {
 			cur.lines = append(cur.lines, renderBlockLines(b)...)
 			cur.body++
 			continue
@@ -790,7 +775,7 @@ func buildSections(blocks []docxBlock) []models.Section {
 
 func renderBlockLines(b docxBlock) []string {
 	lines := strings.Split(b.text, "\n")
-	if b.kind == kindListItem {
+	if b.kind == consts.KindListItem {
 		lines[0] = "- " + lines[0]
 	}
 	return lines
@@ -809,7 +794,7 @@ func headingPath(stack []headingFrame) string {
 }
 
 func isWordNS(space string) bool {
-	return space == nsWordTransitional || space == nsWordStrict
+	return space == consts.NsWordTransitional || space == consts.NsWordStrict
 }
 
 func attrVal(se xml.StartElement, local string) string {

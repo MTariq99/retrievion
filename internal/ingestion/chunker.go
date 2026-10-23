@@ -7,15 +7,9 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/internal/tokenizer"
 	"github.com/mtariq99/retrievion/models"
-)
-
-const (
-	maxChildTokens  = 700
-	minChildTokens  = 50
-	overlapFraction = 0.15
-	maxParentTokens = 2000
 )
 
 type Chunker interface {
@@ -78,7 +72,7 @@ func (c *ParentChildChunker) Chunk(ctx context.Context, doc *models.ParsedDocume
 
 			paragraphs := splitParagraphs(parentText)
 
-			children := splitIntoTokenBounds(paragraphs, maxChildTokens, minChildTokens, overlapFraction, c.tokenizer)
+			children := splitIntoTokenBounds(paragraphs, consts.MaxChildTokens, consts.MinChildTokens, consts.OverlapFraction, c.tokenizer)
 
 			seenChildren := make(map[string]bool)
 
@@ -119,7 +113,7 @@ func (c *ParentChildChunker) Chunk(ctx context.Context, doc *models.ParsedDocume
 }
 
 func (c *ParentChildChunker) splitParents(content string) []string {
-	if c.tokenizer.Count(content) <= maxParentTokens {
+	if c.tokenizer.Count(content) <= consts.MaxParentTokens {
 		return []string{content}
 	}
 
@@ -130,7 +124,7 @@ func (c *ParentChildChunker) splitParents(content string) []string {
 	)
 	for _, p := range splitParagraphs(content) {
 		t := c.tokenizer.Count(p)
-		if tokens+t > maxParentTokens && len(current) > 0 {
+		if tokens+t > consts.MaxParentTokens && len(current) > 0 {
 			parents = append(parents, strings.Join(current, "\n"))
 			current, tokens = nil, 0
 		}

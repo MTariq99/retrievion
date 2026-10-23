@@ -1,26 +1,166 @@
 package consts
 
-import (
-	"time"
+import "time"
+
+// ============================================================
+// AI / LLM / EMBEDDINGS
+// ============================================================
+
+const (
+	DefaultGeminiEmbeddingModel = "gemini-embedding-001"
+	GeminiBaseURL               = "https://generativelanguage.googleapis.com/v1beta"
+	GeminiDimension             = 1536
+	GeminiMaxBatchSize          = 100
+	ServiceBatchCap             = GeminiMaxBatchSize
+	FaithfulnessThreshold       = 0.7
+	GeminiProvider              = "gemini"
 )
 
-type AIAction string
+// LLM generation retry and timeout policy.
+const (
+	LLMMaxRetries         = 3
+	LLMBaseBackoff        = 500 * time.Millisecond
+	LLMMaxBackoff         = 6 * time.Second
+	LLMDefaultCallTimeout = 45 * time.Second
+	LLMStreamCallTimeout  = 90 * time.Second
+)
+
+const (
+	GeminiTimeout = 30 * time.Second
+	MaxRetries    = 4
+	BaseBackoff   = 500 * time.Millisecond
+	MaxBackoff    = 8 * time.Second
+)
+
+// ============================================================
+// AUTHENTICATION / CONTEXT / OTP
+// ============================================================
+
+const (
+	Authorization   = "Authorization"
+	OpaqueTokenID   = "opaque_token_id"
+	UserID          = "user_id"
+	UserEmail       = "user_email"
+	TenantID        = "tenant_id"
+	IsService       = "is_service"
+	ClientID        = "client_id"
+	AccessTokenTTL  = 24 * time.Hour
+	RefreshTokenTTL = 7 * 24 * time.Hour
+	TokenPrefix     = "tok_"
+)
+
+type ContextKey string
+
+const (
+	RequestIDKey ContextKey = "request_id"
+	TraceIDKey   ContextKey = "trace_id"
+	TenantIDKey  ContextKey = "tenant_id"
+)
+
+const (
+	SessionTTL   = 30 * time.Minute
+	CostSpendTTL = 25 * time.Hour
+)
+
+const (
+	OtpVerificationTTL   = 10 * time.Minute
+	OtpForgotPasswordTTL = 10 * time.Minute
+
+	PrefixOTPVerification   = "otp:verification"
+	PrefixOTPForgotPassword = "otp:forgot_password"
+)
+
+// ============================================================
+// DOCUMENTS / MIME TYPES / FILE SIGNATURES
+// ============================================================
 
 const MaxDocumentSize = 50 * 1024 * 1024
 
 const (
-	SessionTTL         = 30 * time.Minute
-	SuggestionCacheTTL = time.Hour
-	UnstuckCacheTTL    = 30 * time.Minute
-	CostSpendTTL       = 25 * time.Hour
-	InvitationTTL      = 24 * time.Hour
+	PDFMIME  = "application/pdf"
+	DOCXMIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 )
+
+type DocumentStatus string
+
+const (
+	DocumentStatusPending    DocumentStatus = "pending"
+	DocumentStatusProcessing DocumentStatus = "processing"
+	DocumentStatusActive     DocumentStatus = "active"
+	DocumentStatusFailed     DocumentStatus = "failed"
+	DocumentStatusArchived   DocumentStatus = "archived"
+)
+
+const (
+	PdfMagic         = "%PDF-"
+	ZipMagic         = "PK\x03\x04"
+	ContentTypesXML  = "[Content_Types].xml"
+	DocxMainPartType = "wordprocessingml.document.main+xml"
+	MaxContentTypes  = 1 << 20
+)
+
+// ============================================================
+// DOCUMENT INGESTION / DOCX PARSING
+// ============================================================
+
+const (
+	DefaultDOCXMaxEntries = 5000
+	DefaultDOCXMaxXMLSize = 64 << 20
+	MaxHeadingRunes       = 200
+	MaxTitleRunes         = 200
+	HeaderDedupeWindow    = 20
+)
+
+const (
+	NsWordTransitional  = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+	NsWordStrict        = "http://purl.oclc.org/ooxml/wordprocessingml/main"
+	NsMC                = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+	DefaultDOCXMainPart = "word/document.xml"
+)
+
+type BlockKind uint8
+
+const (
+	KindParagraph BlockKind = iota
+	KindHeading
+	KindListItem
+)
+
+type JobStatus string
+
+const (
+	JobStatusQueued     JobStatus = "queued"
+	JobStatusProcessing JobStatus = "processing"
+	JobStatusCompleted  JobStatus = "completed"
+	JobStatusFailed     JobStatus = "failed"
+	JobStatusDeadLetter JobStatus = "dead_letter"
+)
+
+// ============================================================
+// CHUNKING
+// ============================================================
 
 const (
 	MaxChildTokens  = 700
 	MinChildTokens  = 50
 	OverlapFraction = 0.15
+	MaxParentTokens = 2000
 )
+
+const SectionSeparator = "\n\n"
+
+// ============================================================
+// RETRIEVAL
+// ============================================================
+
+const (
+	DefaultRetrievalLimit = 20
+	FinalRetrievalTopN    = 10
+)
+
+// ============================================================
+// MESSAGE ROLES / STREAMING
+// ============================================================
 
 type StreamEventType string
 
@@ -38,63 +178,27 @@ const (
 	MessageRoleAssistant MessageRole = "assistant"
 )
 
-const (
-	RoutingKey = "ingestion.jobs"
-	// Main exchange + queue (live traffic)
-	IngestionExchange   = "ingestion.exchange"
-	IngestionQueue      = "ingestion.jobs"
-	IngestionRoutingKey = "ingestion.jobs"
+// ============================================================
+// INGESTION QUEUE / RABBITMQ
+// ============================================================
 
-	// Dead-letter exchange + queue (failed/expired messages)
-	DeadLetterExchange   = "ingestion.dlx"
-	DeadLetterQueue      = "ingestion.jobs.dlq"
-	DeadLetterRoutingKey = "ingestion.jobs.dead"
+const (
+	IngestionExchangeName           = "ingestion.exchange"
+	IngestionQueueName              = "ingestion.jobs"
+	IngestionRoutingKey             = "ingestion.jobs"
+	IngestionDeadLetterExchangeName = "ingestion.dlx"
+	IngestionDeadLetterQueueName    = "ingestion.jobs.dlq"
+	IngestionDeadLetterRoutingKey   = "ingestion.jobs.dead"
 )
 
-const (
-	DefaultRetrievalLimit = 20
-	FinalRetrievalTopN    = 10
-)
+// ============================================================
+// INVITATIONS
+// ============================================================
+type InvitationStatus string
 
 const (
-	PDF  = "application/pdf"
-	DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-)
+	InvitationTTL = 24 * time.Hour
 
-const (
-	PdfMIME  = PDF
-	DocxMIME = DOCX
-)
-
-type DocumentStatus string
-
-const (
-	DocumentStatusPending    DocumentStatus = "pending"
-	DocumentStatusProcessing DocumentStatus = "processing"
-	DocumentStatusActive     DocumentStatus = "active"
-	DocumentStatusFailed     DocumentStatus = "failed"
-	DocumentStatusArchived   DocumentStatus = "archived"
-)
-
-const (
-	DefaultDOCXMaxEntries = 5000
-	DefaultDOCXMaxXMLSize = 64 << 20
-	MaxHeadingRunes       = 200
-	MaxTitleRunes         = 200
-	HeaderDedupeWindow    = 20
-)
-
-const (
-	Authorization = "Authorization"
-	OpaqueTokenID = "opaque_token_id"
-	UserID        = "user_id"
-	UserEmail     = "user_email"
-	TenantID      = "tenant_id"
-	IsService     = "is_service"
-	ClientID      = "client_id"
-)
-
-const (
 	InvitationExchange        = "invitations"
 	InvitationQueue           = "invitations.email"
 	InvitationRetryQueue      = "invitations.email.retry"
@@ -102,7 +206,45 @@ const (
 	InvitationRoutingKey      = "email"
 	InvitationRetryRoutingKey = "email.retry"
 	InvitationDeadRoutingKey  = "email.dead"
-
-	InvitationMaxAttempts = 5
-	InvitationRetryDelay  = 30 * time.Second
+	InvitationMaxAttempts     = 5
+	InvitationRetryDelay      = 30 * time.Second
 )
+
+const (
+	InvitationStatusPending  InvitationStatus = "pending"
+	InvitationStatusAccepted InvitationStatus = "accepted"
+	InvitationStatusRevoked  InvitationStatus = "revoked"
+)
+
+// ============================================================
+// DATABASE / POSTGRESQL
+// ============================================================
+
+const (
+	DriverName             = "postgres"
+	DefaultDatabase        = "postgres"
+	DefaultMaxOpenConns    = 50
+	DefaultMaxIdleConns    = 10
+	ConnectionTimeout      = 10 * time.Second
+	DefaultConnMaxLifetime = 5 * time.Minute
+)
+
+// ============================================================
+// TENANCY / MEMBERSHIP ROLES
+// ============================================================
+
+type Role string
+
+const (
+	RoleOwner        Role = "owner"
+	RoleAdmin        Role = "admin"
+	RoleMember       Role = "member"
+	RoleViewer       Role = "viewer"
+	DefaultWorkspace      = "workspace"
+)
+
+// ============================================================
+// RUNTIME
+// ============================================================
+
+const ShutdownTimeout = 30 * time.Second

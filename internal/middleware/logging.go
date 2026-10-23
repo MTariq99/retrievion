@@ -7,7 +7,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// Logging logs the start and completion of every HTTP request.
 func Logging(log *zap.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()

@@ -76,7 +76,7 @@ type UploadResult struct {
 	DocumentID uuid.UUID
 	VersionID  uuid.UUID
 	JobID      uuid.UUID
-	Status     string
+	Status     consts.DocumentStatus
 }
 
 type PDFOptions struct {

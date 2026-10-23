@@ -21,8 +21,8 @@ type ParserRegistry struct {
 
 func NewParserRegistry(pdf *PDFParser, docx *DOCXParser) *ParserRegistry {
 	return &ParserRegistry{parsers: map[string]Parser{
-		consts.PdfMIME:  pdf,
-		consts.DocxMIME: docx,
+		consts.PDFMIME:  pdf,
+		consts.DOCXMIME: docx,
 	}}
 }
 

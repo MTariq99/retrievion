@@ -7,8 +7,6 @@ import (
 	"github.com/mtariq99/retrievion/models"
 )
 
-// NoopReranker returns fused results unchanged. Swap for a real
-// cross-encoder/API-backed reranker later.
 type NoopReranker struct{}
 
 func NewNoopReranker() *NoopReranker {

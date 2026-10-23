@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/internal/errs"
 	"github.com/mtariq99/retrievion/models"
 )
@@ -246,7 +247,7 @@ func (r *Repository) CreateUserWithTenant(ctx context.Context, u *models.User, t
 		INSERT INTO tenant_members (tenant_id, user_id, role)
 		VALUES ($1, $2, $3)
 	`
-	if _, err := tx.ExecContext(ctx, memberQuery, tenant.ID, u.ID, models.RoleOwner); err != nil {
+	if _, err := tx.ExecContext(ctx, memberQuery, tenant.ID, u.ID, consts.RoleOwner); err != nil {
 		return nil, errs.RepositoryError(err)
 	}
 

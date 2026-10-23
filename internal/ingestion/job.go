@@ -9,8 +9,6 @@ import (
 	"github.com/mtariq99/retrievion/models"
 )
 
-// ParseJob decodes a raw queue message body (see storage.MarshalIngestionJob)
-// into a models.Job with parsed UUIDs.
 func ParseJob(body []byte) (models.Job, error) {
 	var p models.JobPayload
 	if err := json.Unmarshal(body, &p); err != nil {

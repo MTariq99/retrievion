@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/models"
 )
 
@@ -23,7 +24,7 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db, q: db}
 }
 
-func (r *Repository) CreateMessage(ctx context.Context, conversationID uuid.UUID, role string, content string) (*models.Message, error) {
+func (r *Repository) CreateMessage(ctx context.Context, conversationID uuid.UUID, role consts.MessageRole, content string) (*models.Message, error) {
 	if conversationID == uuid.Nil {
 		return nil, fmt.Errorf("conversation ID is required")
 	}

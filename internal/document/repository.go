@@ -14,8 +14,6 @@ import (
 	"github.com/mtariq99/retrievion/models"
 )
 
-// querier is satisfied by both *sql.DB and *sql.Tx, so repository
-// methods work identically whether called inside or outside a transaction.
 type querier interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
@@ -30,9 +28,6 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db, q: db}
 }
 
-// WithTx runs fn inside a PostgreSQL transaction and passes back a
-// documentMutator scoped to that transaction. Commits on success,
-// rolls back on error or panic.
 func (r *Repository) WithTx(ctx context.Context, fn func(tx documentMutator) error) (err error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {

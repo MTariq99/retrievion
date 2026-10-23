@@ -13,10 +13,9 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/mtariq99/retrievion/internal/config"
+	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/internal/storage"
 )
-
-const shutdownTimeout = 30 * time.Second
 
 func main() {
 	cfg, err := config.Load()
@@ -58,7 +57,7 @@ func main() {
 	go func() { errCh <- g.Wait() }()
 
 	select {
-	case err := <-errCh: // a worker stopped on its own
+	case err := <-errCh:
 		if err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("worker exited with error", zap.Error(err))
 			os.Exit(1)
@@ -72,7 +71,7 @@ func main() {
 				os.Exit(1)
 			}
 			logger.Info("worker exited cleanly")
-		case <-time.After(shutdownTimeout):
+		case <-time.After(consts.ShutdownTimeout):
 			logger.Warn("forced shutdown after timeout; in-flight jobs may be redelivered")
 		}
 	}

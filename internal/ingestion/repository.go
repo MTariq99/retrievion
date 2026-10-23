@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/models"
 )
 
@@ -52,7 +53,7 @@ func (r *Repository) MarkJobProcessing(ctx context.Context, jobID uuid.UUID) err
 		SET status = $2, attempts = attempts + 1, started_at = now()
 		WHERE id = $1
 	`
-	_, err := r.db.ExecContext(ctx, query, jobID, models.JobStatusProcessing)
+	_, err := r.db.ExecContext(ctx, query, jobID, consts.JobStatusProcessing)
 	if err != nil {
 		return fmt.Errorf("mark job processing: %w", err)
 	}
@@ -65,39 +66,32 @@ func (r *Repository) MarkJobCompleted(ctx context.Context, jobID uuid.UUID) erro
 		SET status = $2, completed_at = now(), error = NULL
 		WHERE id = $1
 	`
-	_, err := r.db.ExecContext(ctx, query, jobID, models.JobStatusCompleted)
+	_, err := r.db.ExecContext(ctx, query, jobID, consts.JobStatusCompleted)
 	if err != nil {
 		return fmt.Errorf("mark job completed: %w", err)
 	}
 	return nil
 }
 
-// MarkJobFailed records the error. Note: given the current queue setup
-// (Nack routes straight to the DLQ, no requeue), a failed job will not be
-// retried automatically — this status reflects a single failed attempt,
-// not exhaustion of retries. If you later add DLQ-replay, consider setting
-// JobStatusDeadLetter here instead once attempts are exhausted.
 func (r *Repository) MarkJobFailed(ctx context.Context, jobID uuid.UUID, cause error) error {
 	const query = `
 		UPDATE ingestion_jobs
 		SET status = $2, error = $3
 		WHERE id = $1
 	`
-	_, err := r.db.ExecContext(ctx, query, jobID, models.JobStatusFailed, cause.Error())
+	_, err := r.db.ExecContext(ctx, query, jobID, consts.JobStatusFailed, cause.Error())
 	if err != nil {
 		return fmt.Errorf("mark job failed: %w", err)
 	}
 	return nil
 }
 
-// StoreChunks persists all chunks (parent and child) in one transaction.
-// Embeddings must already be populated on child chunks before calling this.
 func (r *Repository) StoreChunks(ctx context.Context, tenantID, documentID uuid.UUID, chunks []models.Chunk, embeddings map[uuid.UUID][]float32) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	const query = `
 		INSERT INTO document_chunks (
@@ -188,26 +182,38 @@ func (r *Repository) ActivateVersion(ctx context.Context, documentID, versionID 
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	if _, err := tx.ExecContext(
 		ctx,
-		`UPDATE document_versions SET status = 'archived' WHERE document_id = $1 AND status = 'active'`,
+		`UPDATE document_versions
+		 SET status = $2
+		 WHERE document_id = $1 AND status = $3`,
 		documentID,
+		consts.DocumentStatusArchived,
+		consts.DocumentStatusActive,
 	); err != nil {
 		return fmt.Errorf("archive previous versions: %w", err)
 	}
 
 	if _, err := tx.ExecContext(
 		ctx,
-		`UPDATE document_versions SET status = 'active' WHERE id = $1`, versionID,
+		`UPDATE document_versions
+		 SET status = $2
+		 WHERE id = $1`,
+		versionID,
+		consts.DocumentStatusActive,
 	); err != nil {
 		return fmt.Errorf("activate version: %w", err)
 	}
 
 	if _, err := tx.ExecContext(
 		ctx,
-		`UPDATE documents SET status = 'active', updated_at = now() WHERE id = $1`, documentID,
+		`UPDATE documents
+		 SET status = $2, updated_at = now()
+		 WHERE id = $1`,
+		documentID,
+		consts.DocumentStatusActive,
 	); err != nil {
 		return fmt.Errorf("update document status: %w", err)
 	}
@@ -215,8 +221,6 @@ func (r *Repository) ActivateVersion(ctx context.Context, documentID, versionID 
 	return tx.Commit()
 }
 
-// pgVector formats a []float32 for pgvector's text input syntax, e.g. '[0.1,0.2,...]'.
-// If you're using pgx + pgvector-go, replace this with pgvector.NewVector(v) instead.
 func pgVector(v []float32) string {
 	s := "["
 	for i, f := range v {

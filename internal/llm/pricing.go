@@ -1,4 +1,3 @@
-// internal/llm/pricing.go
 package llm
 
 import "github.com/mtariq99/retrievion/models"

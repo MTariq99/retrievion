@@ -34,10 +34,6 @@ func (c *Client) CheckBudget(ctx context.Context, userID string, limits Limits) 
 	return nil
 }
 
-// RecordSpend is called from telemetry.go's Record() right after a run
-// completes — this is what closes the loop between observability
-// (Record persists the cost) and enforcement (CheckBudget reads it back
-// on the NEXT request).
 func (c *Client) RecordSpend(ctx context.Context, redis *storage.RedisClient, userID string, costUSD float64, tokens int) error {
 	cKey := costKey(userID)
 	tKey := tokenKey(userID)

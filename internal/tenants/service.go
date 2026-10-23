@@ -63,7 +63,7 @@ func (ts *TenantService) InviteUsers(ctx context.Context, ownerTenantID, userID 
 	if err != nil {
 		return err
 	}
-	if membership.Role != models.RoleOwner {
+	if membership.Role != consts.RoleOwner {
 		return errs.ErrUnauthorized
 	}
 
@@ -76,10 +76,9 @@ func (ts *TenantService) InviteUsers(ctx context.Context, ownerTenantID, userID 
 			return errs.ErrInvalidInvitation
 		}
 		email := strings.ToLower(addr.Address)
-		role := strings.TrimSpace(u.Role)
-
+		role := consts.Role(strings.TrimSpace(u.Role))
 		switch role {
-		case "admin", "member", "viewer":
+		case consts.RoleAdmin, consts.RoleMember, consts.RoleViewer:
 		default:
 			return errs.ErrInvalidInvitation
 		}

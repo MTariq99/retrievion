@@ -6,10 +6,6 @@ import (
 	"github.com/mtariq99/retrievion/internal/consts"
 )
 
-// GenerateRequest is provider-agnostic input to a single LLM call. The
-// prompt itself is fully assembled upstream by prompt/builder.go — this
-// package doesn't know about system instructions, retrieved context, or
-// conversation history, only the final string and generation params.
 type GenerateRequest struct {
 	Prompt      string
 	MaxTokens   int
@@ -33,13 +29,11 @@ type ModelConfig struct {
 	Temperature     float64
 }
 
-// StreamEvent is emitted per chunk while streaming (README §31, §66).
-// chat/service.go forwards these to the SSE encoder essentially unchanged.
 type StreamEvent struct {
 	Type      consts.StreamEventType
-	Content   string      // set on Token events
-	Usage     *TokenUsage // set on the Done event
-	Err       error       // set on the Error event
+	Content   string
+	Usage     *TokenUsage
+	Err       error
 	Timestamp time.Time
 }
 

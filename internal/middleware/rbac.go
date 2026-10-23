@@ -8,11 +8,6 @@ import (
 	"github.com/mtariq99/retrievion/utils"
 )
 
-// RequireRoles allows the request through only if the authenticated
-// user's role is one of the given roles.
-//
-// Must run after the authentication middleware because it reads
-// user claims from the Gin context.
 func RequireRoles(roles ...enums.UserRole) gin.HandlerFunc {
 	allowed := make(map[enums.UserRole]struct{}, len(roles))
 
@@ -40,10 +35,6 @@ func RequireRoles(roles ...enums.UserRole) gin.HandlerFunc {
 	}
 }
 
-// RequireAuth allows any authenticated user to proceed.
-//
-// More fine-grained authorization should be handled by the
-// service/domain layer where necessary.
 func RequireAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if _, ok := utils.GetUserClaims(c); !ok {

@@ -16,10 +16,7 @@ type Resolver interface {
 	) ([]models.Citation, []models.MessageSource, error)
 }
 
-type Service struct {
-	// Add repository here later if DocumentName
-	// needs to be fetched from PostgreSQL.
-}
+type Service struct{}
 
 func NewService() *Service {
 	return &Service{}

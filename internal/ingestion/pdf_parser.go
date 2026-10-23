@@ -27,7 +27,7 @@ func NewPDFParserWithOptions(o models.PDFOptions) *PDFParser {
 }
 
 func (p *PDFParser) Parse(ctx context.Context, r io.Reader, mimeType string) (doc *models.ParsedDocument, err error) {
-	if mimeType != consts.PdfMIME {
+	if mimeType != consts.PDFMIME {
 		return nil, fmt.Errorf("%w: pdf parser received %q", errs.ErrUnsupportedFileType, mimeType)
 	}
 	if err = ctx.Err(); err != nil {

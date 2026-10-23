@@ -5,11 +5,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
-// Every metric here maps directly to a question from the lesson's
-// Section 18 ("senior-level engineering questions I should learn to
-// ask") — each metric exists to answer ONE specific question, not
-// because "more metrics = better observability."
-
 var (
 	LLMRequestsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
@@ -114,6 +109,6 @@ var (
 			Name: "agent_runs_total",
 			Help: "Agent workflow completions, labeled by outcome.",
 		},
-		[]string{"outcome"}, // "final_answer" | "max_iterations" | "error"
+		[]string{"outcome"},
 	)
 )

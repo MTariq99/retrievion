@@ -7,19 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 
+	"github.com/mtariq99/retrievion/internal/consts"
+	"github.com/mtariq99/retrievion/internal/errs"
 	"github.com/mtariq99/retrievion/models"
-)
-
-const (
-	defaultGeminiModel = "text-embedding-004"
-	geminiBaseURL      = "https://generativelanguage.googleapis.com/v1beta"
-	geminiTimeout      = 30 * time.Second
-	// Gemini's batchEmbedContents caps requests per call — verify against
-	// current API docs before relying on this; provider limits do change.
-	geminiMaxBatchSize = 100
-	geminiDimension    = 1536 // text-embedding-001 default output dimension
 )
 
 type GeminiProvider struct {
@@ -37,45 +28,43 @@ func NewGeminiProvider(cfg *models.Config) (*GeminiProvider, error) {
 
 	model := cfg.Embedding.Model
 	if model == "" {
-		model = defaultGeminiModel
+		model = consts.DefaultGeminiEmbeddingModel
 	}
 
 	return &GeminiProvider{
 		apiKey:    apiKey,
 		model:     model,
-		dimension: geminiDimension,
+		dimension: consts.GeminiDimension,
 		httpClient: &http.Client{
-			Timeout: geminiTimeout,
+			Timeout: consts.GeminiTimeout,
 		},
 	}, nil
 }
 
 func (g *GeminiProvider) Metadata() models.EmbeddingModelMetadata {
 	return models.EmbeddingModelMetadata{
-		Provider:  "gemini",
+		Provider:  consts.GeminiProvider,
 		Model:     g.model,
 		Dimension: g.dimension,
 	}
 }
 
-// Embed calls Gemini's batchEmbedContents once. Callers with more than
-// geminiMaxBatchSize texts should go through Service, which chunks larger
-// input into provider-sized batches — call this directly only if you
-// already know your batch fits within the limit.
 func (g *GeminiProvider) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
-		return nil, ErrEmptyInput
+		return nil, errs.ErrEmptyInput
 	}
-	if len(texts) > geminiMaxBatchSize {
-		return nil, fmt.Errorf("embedding: batch of %d exceeds gemini limit of %d, use Service instead", len(texts), geminiMaxBatchSize)
+	if len(texts) > consts.GeminiMaxBatchSize {
+		return nil, fmt.Errorf("embedding: batch of %d exceeds gemini limit of %d, use Service instead", len(texts), consts.GeminiMaxBatchSize)
 	}
 
 	reqBody := geminiBatchRequest{Requests: make([]geminiEmbedRequest, len(texts))}
 	for i, t := range texts {
 		reqBody.Requests[i] = geminiEmbedRequest{
-			Model:                "models/" + g.model,
-			Content:              geminiContent{Parts: []geminiPart{{Text: t}}},
-			OutputDimensionality: 1536,
+			Model:   "models/" + g.model,
+			Content: geminiContent{Parts: []geminiPart{{Text: t}}},
+			EmbedContentConfig: geminiEmbedContentConfig{
+				OutputDimensionality: g.dimension,
+			},
 		}
 	}
 
@@ -84,7 +73,7 @@ func (g *GeminiProvider) Embed(ctx context.Context, texts []string) ([][]float32
 		return nil, fmt.Errorf("embedding: marshal request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/models/%s:batchEmbedContents?key=%s", geminiBaseURL, g.model, g.apiKey)
+	url := fmt.Sprintf("%s/models/%s:batchEmbedContents?key=%s", consts.GeminiBaseURL, g.model, g.apiKey)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -113,7 +102,7 @@ func (g *GeminiProvider) Embed(ctx context.Context, texts []string) ([][]float32
 	}
 
 	if len(parsed.Embeddings) != len(texts) {
-		return nil, ErrDimensionMismatch
+		return nil, errs.ErrDimensionMismatch
 	}
 
 	vectors := make([][]float32, len(parsed.Embeddings))
@@ -127,16 +116,18 @@ func (g *GeminiProvider) Embed(ctx context.Context, texts []string) ([][]float32
 	return vectors, nil
 }
 
-// --- Gemini wire format ---
-
 type geminiBatchRequest struct {
 	Requests []geminiEmbedRequest `json:"requests"`
 }
 
 type geminiEmbedRequest struct {
-	Model                string        `json:"model"`
-	Content              geminiContent `json:"content"`
-	OutputDimensionality int           `json:"outputDimensionality,omitempty"`
+	Model              string                   `json:"model"`
+	Content            geminiContent            `json:"content"`
+	EmbedContentConfig geminiEmbedContentConfig `json:"embedContentConfig"`
+}
+
+type geminiEmbedContentConfig struct {
+	OutputDimensionality int `json:"outputDimensionality"`
 }
 
 type geminiContent struct {

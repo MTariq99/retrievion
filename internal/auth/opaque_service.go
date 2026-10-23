@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/internal/storage"
 	"github.com/mtariq99/retrievion/models"
 )
@@ -27,9 +28,9 @@ type TokenConfig struct {
 
 func NewTokenConfig() *TokenConfig {
 	return &TokenConfig{
-		AccessTokenTTL:  24 * time.Hour,
-		RefreshTokenTTL: 7 * 24 * time.Hour,
-		TokenPrefix:     "tok_",
+		AccessTokenTTL:  consts.AccessTokenTTL,
+		RefreshTokenTTL: consts.RefreshTokenTTL,
+		TokenPrefix:     consts.TokenPrefix,
 	}
 }
 

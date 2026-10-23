@@ -61,11 +61,6 @@ func (t *Tokenizer) Count(text string) int {
 
 	result, err := t.local.CountTokens(contents, nil)
 	if err != nil {
-		// This should be extremely rare because the tokenizer is
-		// initialized successfully during application startup.
-		//
-		// Keep the application alive rather than returning zero,
-		// which would be much more dangerous for context budgeting.
 		return fallbackEstimate(text)
 	}
 

@@ -1,6 +1,5 @@
 package models
 
-// Config is the root application configuration.
 type Config struct {
 	App           AppConfig           `mapstructure:",squash"`
 	Server        ServerConfig        `mapstructure:",squash"`
@@ -18,12 +17,10 @@ type Config struct {
 	FrontEnd      FrontEnd            `mapstructure:",squash"`
 }
 
-// AppConfig contains application-level configuration.
 type AppConfig struct {
 	Env string `mapstructure:"APP_ENV"`
 }
 
-// ServerConfig contains HTTP server configuration.
 type ServerConfig struct {
 	Port           string `mapstructure:"HTTP_PORT"`
 	AllowedOrigins string `mapstructure:"ALLOWED_ORIGINS"`
@@ -38,7 +35,6 @@ type DatabaseConfig struct {
 	MigrationPath string `mapstructure:"MIGRATION_PATH"`
 }
 
-// RedisConfig contains Redis configuration.
 type RedisConfig struct {
 	URL      string `mapstructure:"REDIS_URL"`
 	Addr     string `mapstructure:"REDIS_ADDR"`
@@ -46,14 +42,12 @@ type RedisConfig struct {
 	DB       int    `mapstructure:"REDIS_DB"`
 }
 
-// RabbitMQConfig contains RabbitMQ configuration.
 type RabbitMQConfig struct {
 	URL      string `mapstructure:"RABBITMQ_URL"`
 	User     string `mapstructure:"RABBITMQ_USER"`
 	Password string `mapstructure:"RABBITMQ_PASSWORD"`
 }
 
-// StorageConfig contains object storage configuration.
 type StorageConfig struct {
 	B2Bucket          string `mapstructure:"B2_BUCKET"`
 	B2AccessKey       string `mapstructure:"B2_ACCESS_KEY"`
@@ -63,13 +57,11 @@ type StorageConfig struct {
 	B2SignedURLExpiry string `mapstructure:"B2_SIGNED_URL_EXPIRY"`
 }
 
-// LLMConfig contains LLM provider configuration.
 type LLMConfig struct {
 	Provider string `mapstructure:"LLM_PROVIDER"`
 	APIKey   string `mapstructure:"LLM_API_KEY"`
 	Model    string `mapstructure:"LLM_MODEL"`
 
-	// Gemini-specific configuration.
 	GeminiAPIKey          string  `mapstructure:"GEMINI_API_KEY"`
 	GeminiProjectName     string  `mapstructure:"PROJECT_NAME"`
 	GeminiProjectNumber   string  `mapstructure:"PROJECT_NUMBER"`
@@ -82,20 +74,17 @@ type LLMConfig struct {
 	MaxContextTokens      int     `mapstructure:"MAX_CONTEXT_TOKENS"`
 }
 
-// EmbeddingConfig contains embedding model configuration.
 type EmbeddingConfig struct {
 	Provider string `mapstructure:"EMBEDDING_PROVIDER"`
 	APIKey   string `mapstructure:"EMBEDDING_API_KEY"`
 	Model    string `mapstructure:"EMBEDDING_MODEL"`
 }
 
-// RerankerConfig contains reranking configuration.
 type RerankerConfig struct {
 	Provider string `mapstructure:"RERANKER_PROVIDER"`
 	APIKey   string `mapstructure:"RERANKER_API_KEY"`
 }
 
-// AuthConfig contains authentication and JWT configuration.
 type AuthConfig struct {
 	JWTSecret          string `mapstructure:"JWT_SECRET"`
 	JWTExpirationHours int    `mapstructure:"JWT_EXPIRATION_HOURS"`
@@ -108,7 +97,6 @@ type AuthConfig struct {
 	TokenPrefix     string `mapstructure:"TOKEN_PREFIX"`
 }
 
-// GoogleOAuthConfig contains Google OAuth configuration.
 type GoogleOAuthConfig struct {
 	ClientID     string `mapstructure:"GOOGLE_OAUTH_CLIENTID"`
 	ClientSecret string `mapstructure:"GOOGLE_OAUTH_CLIENT_SECRET"`
@@ -116,7 +104,6 @@ type GoogleOAuthConfig struct {
 	UserInfoURL  string `mapstructure:"GOOGLE_USERINFO_API"`
 }
 
-// ObservabilityConfig contains monitoring and tracing configuration.
 type ObservabilityConfig struct {
 	OTelEndpoint         string `mapstructure:"OTEL_ENDPOINT"`
 	GrafanaAdminPassword string `mapstructure:"GRAFANA_ADMIN_PASSWORD"`

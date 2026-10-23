@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/internal/enums"
 	"github.com/mtariq99/retrievion/internal/errs"
 	"github.com/mtariq99/retrievion/models"
@@ -87,7 +88,7 @@ func (s *Service) Register(ctx context.Context, req models.RegisterRequest) (*mo
 	}
 	TenantName, err := CreateTenantName(req.Name)
 	if err != nil {
-		TenantName = enums.DefaultWorkspace
+		TenantName = consts.DefaultWorkspace
 	}
 	tenant, err := s.userWriter.CreateUserWithTenant(ctx, user, TenantName)
 	if err != nil {
@@ -162,5 +163,5 @@ func CreateTenantName(userName string) (string, error) {
 	if userName == "" {
 		return "", errs.ErrMissingUserName
 	}
-	return strings.ToUpper(userName[:1]) + userName[1:] + "'s " + strings.ToUpper(enums.DefaultWorkspace[:1]) + enums.DefaultWorkspace[1:], nil
+	return strings.ToUpper(userName[:1]) + userName[1:] + "'s " + strings.ToUpper(consts.DefaultWorkspace[:1]) + consts.DefaultWorkspace[1:], nil
 }

@@ -1,16 +1,8 @@
--- 006_conversations.up.sql
--- A conversation belongs to exactly one tenant AND one user (the person
--- who started it) — this is what conversation/service.go's history loading
--- and summarization (Section 29 of the architecture doc) operates on.
 CREATE TABLE conversations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants (id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     title TEXT,
-    -- Rolling summary of older turns (Section 29: "old messages → summary,
-    -- recent messages remain verbatim") — this is the production
-    -- implementation of Topic 2's sliding-window/summarization lesson for
-    -- managing long conversation token cost.
     summary TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()

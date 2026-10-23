@@ -175,7 +175,7 @@ func (s *Service) UploadDocument(ctx context.Context, userID, tenantID uuid.UUID
 		return nil, fmt.Errorf("marshal ingestion event: %w", err)
 	}
 
-	if err := s.queue.Publish(ctx, consts.RoutingKey, body); err != nil {
+	if err := s.queue.Publish(ctx, consts.IngestionRoutingKey, body); err != nil {
 		return nil, fmt.Errorf("publish ingestion event: %w", err)
 	}
 
@@ -183,7 +183,7 @@ func (s *Service) UploadDocument(ctx context.Context, userID, tenantID uuid.UUID
 		DocumentID: documentID,
 		VersionID:  versionID,
 		JobID:      jobID,
-		Status:     "processing",
+		Status:     consts.DocumentStatusProcessing,
 	}, nil
 }
 

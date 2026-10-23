@@ -4,8 +4,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// RetrievalQuery is what gets passed into retrieval/service.go's
-// Retrieve() function.
 type RetrievalQuery struct {
 	Query          string
 	QueryEmbedding []float32
@@ -14,14 +12,9 @@ type RetrievalQuery struct {
 	Limit          int
 }
 
-// RetrievalFilters captures the metadata filtering dimensions called out
-// in Topic 9 Section 3.9 — tenant is mandatory and handled separately
-// (never optional), everything here is additional narrowing.
 type RetrievalFilters struct {
-	DocumentIDs []uuid.UUID // restrict to specific documents, if set
+	DocumentIDs []uuid.UUID
 	Sections    []string
-	// Extend here for date ranges, categories, ACL groups, etc. as
-	// your product actually needs them — don't add filters speculatively.
 }
 
 type Query struct {

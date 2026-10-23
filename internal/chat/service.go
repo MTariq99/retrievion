@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/mtariq99/retrievion/internal/citation"
+	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/internal/conversation"
 	"github.com/mtariq99/retrievion/internal/embedding"
 	"github.com/mtariq99/retrievion/internal/llm"
@@ -19,7 +20,7 @@ import (
 )
 
 type chatMutator interface {
-	CreateMessage(ctx context.Context, conversationID uuid.UUID, role string, content string) (*models.Message, error)
+	CreateMessage(ctx context.Context, conversationID uuid.UUID, role consts.MessageRole, content string) (*models.Message, error)
 	CreateMessageSources(ctx context.Context, messageID uuid.UUID, sources []models.MessageSource) error
 }
 
@@ -83,7 +84,7 @@ func (s *Service) Chat(ctx context.Context, userID, tenantID uuid.UUID, req *mod
 		return nil, fmt.Errorf("get conversation: %w", err)
 	}
 
-	_, err = s.chatMutator.CreateMessage(ctx, req.ConversationID, "user", req.Message)
+	_, err = s.chatMutator.CreateMessage(ctx, req.ConversationID, consts.MessageRoleUser, req.Message)
 	if err != nil {
 		return nil, fmt.Errorf("save user message: %w", err)
 	}
@@ -132,7 +133,7 @@ func (s *Service) Chat(ctx context.Context, userID, tenantID uuid.UUID, req *mod
 		return nil, err
 	}
 
-	assistantMessage, err := s.chatMutator.CreateMessage(ctx, req.ConversationID, "assistant", result.Text)
+	assistantMessage, err := s.chatMutator.CreateMessage(ctx, req.ConversationID, consts.MessageRoleAssistant, result.Text)
 	if err != nil {
 		return nil, err
 	}
@@ -174,19 +175,16 @@ func (s *Service) StreamChat(ctx context.Context, userID, tenantID uuid.UUID, re
 		return nil, fmt.Errorf("message is required")
 	}
 
-	// 1. Load conversation.
 	conv, err := s.conversationService.GetConversation(ctx, userID, tenantID, req.ConversationID)
 	if err != nil {
 		return nil, fmt.Errorf("get conversation: %w", err)
 	}
 
-	// 2. Save user message.
-	_, err = s.chatMutator.CreateMessage(ctx, req.ConversationID, "user", req.Message)
+	_, err = s.chatMutator.CreateMessage(ctx, req.ConversationID, consts.MessageRoleUser, req.Message)
 	if err != nil {
 		return nil, fmt.Errorf("save user message: %w", err)
 	}
 
-	// 3. Embed query.
 	embeddings, err := s.embedding.Embed(ctx, []string{req.Message})
 	if err != nil {
 		return nil, fmt.Errorf("embed query: %w", err)
@@ -196,7 +194,6 @@ func (s *Service) StreamChat(ctx context.Context, userID, tenantID uuid.UUID, re
 		return nil, fmt.Errorf("embedding provider returned no embedding")
 	}
 
-	// 4. Retrieve relevant chunks.
 	retrievalQuery := models.RetrievalQuery{
 		TenantID:       tenantID,
 		UserID:         userID,
@@ -208,16 +205,13 @@ func (s *Service) StreamChat(ctx context.Context, userID, tenantID uuid.UUID, re
 		return nil, fmt.Errorf("retrieve context: %w", err)
 	}
 
-	// 5. Build context within the remaining token budget.
 	contextText := s.buildBoundedContext(conv, req.Message, results)
 
-	// 6. Build prompt.
 	generateRequest, err := s.prompt.Build(conv, req.Message, contextText)
 	if err != nil {
 		return nil, fmt.Errorf("build prompt: %w", err)
 	}
 
-	// 7. Start LLM stream.
 	events := s.llm.Stream(ctx, generateRequest.Prompt)
 
 	var answer strings.Builder
@@ -242,19 +236,16 @@ func (s *Service) StreamChat(ctx context.Context, userID, tenantID uuid.UUID, re
 		return nil, fmt.Errorf("LLM returned an empty response")
 	}
 
-	// 8. Resolve citations.
 	sources, messageSources, err := s.citation.Resolve(ctx, finalAnswer, results)
 	if err != nil {
 		return nil, fmt.Errorf("resolve citations: %w", err)
 	}
 
-	// 9. Save assistant message.
-	assistantMessage, err := s.chatMutator.CreateMessage(ctx, req.ConversationID, "assistant", finalAnswer)
+	assistantMessage, err := s.chatMutator.CreateMessage(ctx, req.ConversationID, consts.MessageRoleAssistant, finalAnswer)
 	if err != nil {
 		return nil, fmt.Errorf("save assistant message: %w", err)
 	}
 
-	// 10. Save citation sources.
 	for i := range messageSources {
 		messageSources[i].MessageID = assistantMessage.ID
 	}
@@ -263,7 +254,6 @@ func (s *Service) StreamChat(ctx context.Context, userID, tenantID uuid.UUID, re
 		return nil, fmt.Errorf("save message sources: %w", err)
 	}
 
-	// 11. Return the complete response.
 	return &models.ChatResponse{
 		ConversationID: req.ConversationID,
 		MessageID:      assistantMessage.ID,

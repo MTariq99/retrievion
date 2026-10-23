@@ -236,8 +236,6 @@ func (e *ProviderError) Retryable() bool {
 		e.StatusCode >= 500
 }
 
-// internal/llm/client.go — add this method
-
 func (c *Client) GenerateStructured(ctx context.Context, prompt string, schema map[string]interface{}) (string, error) {
 	reqBody := models.GeminiRequest{
 		Contents: []models.Content{

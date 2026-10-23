@@ -8,15 +8,8 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/redis/go-redis/v9"
-)
-
-const (
-	otpVerificationTTL   = 10 * time.Minute
-	otpForgotPasswordTTL = 10 * time.Minute
-
-	prefixOTPVerification   = "otp:verification"
-	prefixOTPForgotPassword = "otp:forgot_password"
 )
 
 type OTPData struct {
@@ -33,21 +26,21 @@ func (r *RedisClient) SaveEmailVerificationOTP(ctx context.Context, email, otp s
 		OTP:       otp,
 		Email:     email,
 		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(otpVerificationTTL),
+		ExpiresAt: time.Now().Add(consts.OtpVerificationTTL),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to marshal verification OTP: %w", err)
 	}
 
-	key := fmt.Sprintf("%s:%s", prefixOTPVerification, email)
-	if err := r.client.Set(ctx, key, data, otpVerificationTTL).Err(); err != nil {
+	key := fmt.Sprintf("%s:%s", consts.PrefixOTPVerification, email)
+	if err := r.client.Set(ctx, key, data, consts.OtpVerificationTTL).Err(); err != nil {
 		return fmt.Errorf("failed to save verification OTP: %w", err)
 	}
 	return nil
 }
 
 func (r *RedisClient) GetEmailVerificationOTP(ctx context.Context, email string) (*OTPData, error) {
-	key := fmt.Sprintf("%s:%s", prefixOTPVerification, email)
+	key := fmt.Sprintf("%s:%s", consts.PrefixOTPVerification, email)
 	return r.getOTP(ctx, key)
 }
 
@@ -64,7 +57,7 @@ func (r *RedisClient) VerifyEmailOTP(ctx context.Context, email, otp string) err
 }
 
 func (r *RedisClient) DeleteEmailVerificationOTP(ctx context.Context, email string) error {
-	key := fmt.Sprintf("%s:%s", prefixOTPVerification, email)
+	key := fmt.Sprintf("%s:%s", consts.PrefixOTPVerification, email)
 	return r.client.Del(ctx, key).Err()
 }
 
@@ -75,21 +68,21 @@ func (r *RedisClient) SaveForgotPasswordOTP(ctx context.Context, email, otp stri
 		OTP:       otp,
 		Email:     email,
 		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(otpForgotPasswordTTL),
+		ExpiresAt: time.Now().Add(consts.OtpForgotPasswordTTL),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to marshal forgot password OTP: %w", err)
 	}
 
-	key := fmt.Sprintf("%s:%s", prefixOTPForgotPassword, email)
-	if err := r.client.Set(ctx, key, data, otpForgotPasswordTTL).Err(); err != nil {
+	key := fmt.Sprintf("%s:%s", consts.PrefixOTPForgotPassword, email)
+	if err := r.client.Set(ctx, key, data, consts.OtpForgotPasswordTTL).Err(); err != nil {
 		return fmt.Errorf("failed to save forgot password OTP: %w", err)
 	}
 	return nil
 }
 
 func (r *RedisClient) GetForgotPasswordOTP(ctx context.Context, email string) (*OTPData, error) {
-	key := fmt.Sprintf("%s:%s", prefixOTPForgotPassword, email)
+	key := fmt.Sprintf("%s:%s", consts.PrefixOTPForgotPassword, email)
 	return r.getOTP(ctx, key)
 }
 
@@ -106,7 +99,7 @@ func (r *RedisClient) VerifyForgotPasswordOTP(ctx context.Context, email, otp st
 }
 
 func (r *RedisClient) DeleteForgotPasswordOTP(ctx context.Context, email string) error {
-	key := fmt.Sprintf("%s:%s", prefixOTPForgotPassword, email)
+	key := fmt.Sprintf("%s:%s", consts.PrefixOTPForgotPassword, email)
 	return r.client.Del(ctx, key).Err()
 }
 

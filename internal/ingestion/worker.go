@@ -6,11 +6,10 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/internal/storage"
 	"github.com/mtariq99/retrievion/models"
 )
-
-const ingestionQueueName = "ingestion.jobs"
 
 type Worker struct {
 	queue    storage.Queue
@@ -23,14 +22,11 @@ func NewWorker(queue storage.Queue, pipeline *Pipeline, logger *zap.Logger) *Wor
 }
 
 func (w *Worker) Run(ctx context.Context) error {
-	return w.queue.Consume(ctx, ingestionQueueName, func(msg models.QueueMessage) error {
+	return w.queue.Consume(ctx, consts.IngestionQueueName, func(msg models.QueueMessage) error {
 		return w.handle(ctx, msg)
 	})
 }
 
-// handle returns an error to trigger Nack (→ dead-letter queue) or nil to
-// trigger Ack — Consume in internal/storage/queue.go does both itself, so
-// this must not call Ack/Nack directly.
 func (w *Worker) handle(ctx context.Context, msg models.QueueMessage) (err error) {
 	defer func() {
 		if r := recover(); r != nil {

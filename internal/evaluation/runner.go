@@ -1,4 +1,3 @@
-// internal/evaluation/runner.go
 package evaluation
 
 import (
@@ -28,18 +27,7 @@ type RunOptions struct {
 	EvalUserID     uuid.UUID
 }
 
-func RunFullEvaluation(
-	ctx context.Context,
-	pool *pgxpool.Pool,
-	retrievalSvc *retrieval.Service,
-	embedder *embedding.Service,
-	llmSvc *llm.Service,
-	llmClient *llm.Client,
-	promptBuilder *prompt.Builder,
-	counter tokenizer.Counter, // NEW — injected once at startup, shared with chat.Service
-	cfg *models.Config,
-	opts RunOptions,
-) (evalRunID uuid.UUID, passRate float64, err error) {
+func RunFullEvaluation(ctx context.Context, pool *pgxpool.Pool, retrievalSvc *retrieval.Service, embedder *embedding.Service, llmSvc *llm.Service, llmClient *llm.Client, promptBuilder *prompt.Builder, counter tokenizer.Counter, cfg *models.Config, opts RunOptions) (evalRunID uuid.UUID, passRate float64, err error) {
 	log := logger.FromContext(ctx)
 
 	evalRunID = uuid.New()
@@ -148,18 +136,7 @@ func RunFullEvaluation(
 	return evalRunID, passRate, err
 }
 
-func generateAnswerForEval(
-	ctx context.Context,
-	retrievalSvc *retrieval.Service,
-	embedder *embedding.Service,
-	llmSvc *llm.Service,
-	promptBuilder *prompt.Builder,
-	counter tokenizer.Counter,
-	cfg *models.Config,
-	tenantID, evalUserID uuid.UUID,
-	question string,
-	k int,
-) (contextTexts []string, answer string, err error) {
+func generateAnswerForEval(ctx context.Context, retrievalSvc *retrieval.Service, embedder *embedding.Service, llmSvc *llm.Service, promptBuilder *prompt.Builder, counter tokenizer.Counter, cfg *models.Config, tenantID, evalUserID uuid.UUID, question string, k int) (contextTexts []string, answer string, err error) {
 	embeddings, err := embedder.Embed(ctx, []string{question})
 	if err != nil {
 		return nil, "", err

@@ -10,10 +10,6 @@ import (
 	"github.com/mtariq99/retrievion/pkg/metrics"
 )
 
-// RunTelemetry is the Go-side mirror of the llm_runs table
-// (migrations/010_observability.up.sql). This is the concrete
-// implementation of Section 3.2's JSON example — every field there
-// has a home here.
 type RunTelemetry struct {
 	RequestID      uuid.UUID
 	TraceID        string
@@ -31,7 +27,7 @@ type RunTelemetry struct {
 
 	InputTokens    int
 	OutputTokens   int
-	ThoughtsTokens int // your Topic 1 Gemini lesson, tracked permanently
+	ThoughtsTokens int
 	TotalTokens    int
 
 	LatencyMs          int64
@@ -52,20 +48,9 @@ type RunTelemetry struct {
 	Error string
 }
 
-// Record persists telemetry AND emits metrics in one call — called at
-// the end of EVERY LLM invocation in the codebase (wrap your existing
-// client.go / service.go / streaming.go call sites with this).
-//
-// Deliberately non-blocking-adjacent design note: in production, this
-// write should go through an async queue (Section 8's "telemetry must
-// not become a reliability dependency" principle) rather than a
-// synchronous INSERT on the request's hot path. This version does a
-// direct insert for clarity — see the comment at the bottom for the
-// async upgrade path.
 func Record(ctx context.Context, pool *pgxpool.Pool, t RunTelemetry) {
 	log := logger.FromContext(ctx)
 
-	// --- Metrics first (in-memory, cheap, never fails) ---
 	status := "success"
 	if t.Error != "" {
 		status = "error"
@@ -86,7 +71,6 @@ func Record(ctx context.Context, pool *pgxpool.Pool, t RunTelemetry) {
 		metrics.TimeToFirstTokenSeconds.WithLabelValues(t.Model).Observe(float64(*t.TimeToFirstTokenMs) / 1000.0)
 	}
 
-	// --- Structured log line — human-searchable, correlated via request_id ---
 	log.Info(
 		"llm run completed",
 		"model", t.Model,
@@ -100,7 +84,6 @@ func Record(ctx context.Context, pool *pgxpool.Pool, t RunTelemetry) {
 		"error", t.Error,
 	)
 
-	// --- Durable storage — the queryable record for later debugging ---
 	_, err := pool.Exec(
 		ctx, `
 		INSERT INTO llm_runs (
@@ -135,17 +118,10 @@ func Record(ctx context.Context, pool *pgxpool.Pool, t RunTelemetry) {
 		t.EstimatedCostUSD, t.Error,
 	)
 	if err != nil {
-		// Deliberate: a telemetry WRITE failure must never fail the
-		// user's actual request (Section 8's core principle). Log it
-		// loudly and move on — never propagate this error upward.
 		log.Error("failed to persist llm run telemetry", "error", err)
 	}
 }
 
-// classifyError maps a raw error string into a small set of stable
-// label values — Prometheus label cardinality must stay bounded
-// (Section 8/9's "high-cardinality metrics" failure scenario), so this
-// NEVER uses the raw error message itself as a label.
 func classifyError(errMsg string) string {
 	switch {
 	case contains(errMsg, "timeout"):
@@ -170,22 +146,9 @@ func contains(s, substr string) bool {
 	}()
 }
 
-// StartTimer is a tiny helper for the common "measure elapsed ms"
-// pattern used to populate LatencyMs / RetrievalLatencyMs / etc.
 func StartTimer() func() int64 {
 	start := time.Now()
 	return func() int64 {
 		return time.Since(start).Milliseconds()
 	}
 }
-
-// NOTE on the async upgrade path referenced above: once request volume
-// justifies it, replace the synchronous pool.Exec call with:
-//   1. Marshal RunTelemetry to JSON
-//   2. Publish to your existing storage/queue.go (RabbitMQ, per your
-//      architecture doc)
-//   3. A separate worker (parallel to your existing ingestion worker)
-//      consumes the queue and performs the INSERT
-// This decouples "was the telemetry write slow/failed" from "did the
-// user's request succeed" entirely — exactly Section 8's principle,
-// taken to its production conclusion.

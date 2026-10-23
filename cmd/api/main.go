@@ -14,16 +14,13 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	_ "github.com/golang-migrate/migrate/v4/source/file" // registers the "file://" source driver
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/mtariq99/retrievion/internal/config"
+	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/internal/middleware"
 	"github.com/mtariq99/retrievion/internal/storage"
 	"github.com/mtariq99/retrievion/models"
 	"go.uber.org/zap"
-)
-
-const (
-	shutdownTimeout = 30 * time.Second
 )
 
 func main() {
@@ -83,7 +80,7 @@ func main() {
 
 	logger.Info("shutdown signal received, draining connections...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), consts.ShutdownTimeout)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {

@@ -14,9 +14,6 @@ func RepositoryError(err error) error {
 	if err == nil {
 		return nil
 	}
-
-	// Context errors should be preserved because callers may need to
-	// distinguish cancellation from timeout.
 	if errors.Is(err, context.Canceled) {
 		return context.Canceled
 	}
@@ -25,12 +22,10 @@ func RepositoryError(err error) error {
 		return fmt.Errorf("%w: %v", ErrDatabaseTimeout, err)
 	}
 
-	// database/sql
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
 
-	// PostgreSQL
 	var pgErr *pgconn.PgError
 
 	if errors.As(err, &pgErr) {
