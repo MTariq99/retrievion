@@ -5,9 +5,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mtariq99/retrievion/internal/consts"
@@ -21,6 +25,8 @@ type Client struct {
 	GenerateURL string
 	StreamURL   string
 	redisClient *storage.RedisClient
+	requestMu   sync.Mutex
+	lastRequest time.Time
 }
 
 func NewClient(cfg *models.Config, redisC *storage.RedisClient) (*Client, error) {
@@ -85,6 +91,10 @@ func (c *Client) doGenerate(ctx context.Context, prompt string, maxTokens int, t
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
+	if err := c.waitForRequestSlot(ctx); err != nil {
+		return nil, fmt.Errorf("gemini: wait for request slot: %w", err)
+	}
+
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("gemini: http request: %w", err)
@@ -92,7 +102,30 @@ func (c *Client) doGenerate(ctx context.Context, prompt string, maxTokens int, t
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, &ProviderError{StatusCode: resp.StatusCode}
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf(
+				"gemini: read error response (HTTP %d): %w",
+				resp.StatusCode,
+				readErr,
+			)
+		}
+
+		var providerResponse struct {
+			Error struct {
+				Status  string `json:"status"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+
+		_ = json.Unmarshal(body, &providerResponse)
+
+		return nil, &ProviderError{
+			StatusCode: resp.StatusCode,
+			Status:     providerResponse.Error.Status,
+			Message:    providerResponse.Error.Message,
+			Body:       string(body),
+		}
 	}
 
 	var gemResp models.GeminiResponse
@@ -137,6 +170,9 @@ func (c *Client) Stream(ctx context.Context, req models.GenerateRequest, callbac
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
 
+	if err := c.waitForRequestSlot(ctx); err != nil {
+		return fmt.Errorf("gemini: wait for request slot: %w", err)
+	}
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return fmt.Errorf("gemini: http request: %w", err)
@@ -144,7 +180,7 @@ func (c *Client) Stream(ctx context.Context, req models.GenerateRequest, callbac
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return &ProviderError{StatusCode: resp.StatusCode}
+		return providerErrorFromResponse(resp)
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -204,6 +240,7 @@ type ProviderError struct {
 	Status     string
 	Message    string
 	Body       string
+	RetryAfter time.Duration
 }
 
 func (e *ProviderError) Error() string {
@@ -231,7 +268,27 @@ func (e *ProviderError) ContextLengthExceeded() bool {
 		strings.Contains(message, "token limit")
 }
 
+// IsDailyQuotaExceeded reports whether an error indicates an exhausted
+// daily Gemini generation quota. It follows wrapped provider errors.
+func IsDailyQuotaExceeded(err error) bool {
+	var providerErr *ProviderError
+	if !errors.As(err, &providerErr) {
+		return false
+	}
+
+	message := strings.ToLower(providerErr.Message + " " + providerErr.Body)
+	return strings.Contains(message, "per day limit exceeded") ||
+		strings.Contains(message, "requests per day") ||
+		strings.Contains(message, "generate_content_free_tier_requests")
+}
+
 func (e *ProviderError) Retryable() bool {
+	message := strings.ToLower(e.Message + " " + e.Body)
+
+	if strings.Contains(message, "per day limit exceeded") || strings.Contains(message, "requests per day") || strings.Contains(message, "generate_content_free_tier_requests") {
+		return false
+	}
+
 	return e.StatusCode == http.StatusTooManyRequests ||
 		e.StatusCode >= 500
 }
@@ -261,6 +318,9 @@ func (c *Client) GenerateStructured(ctx context.Context, prompt string, schema m
 		return "", fmt.Errorf("gemini: create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	if err := c.waitForRequestSlot(ctx); err != nil {
+		return "", fmt.Errorf("gemini: wait for request slot: %w", err)
+	}
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -269,7 +329,7 @@ func (c *Client) GenerateStructured(ctx context.Context, prompt string, schema m
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", &ProviderError{StatusCode: resp.StatusCode}
+		return "", providerErrorFromResponse(resp)
 	}
 
 	var gemResp models.GeminiResponse
@@ -282,4 +342,62 @@ func (c *Client) GenerateStructured(ctx context.Context, prompt string, schema m
 	}
 
 	return gemResp.Candidates[0].Content.Parts[0].Text, nil
+}
+
+const geminiMinRequestInterval = 13 * time.Second
+
+var retryAfterPattern = regexp.MustCompile(
+	`(?i)retry in\s+([0-9]+(?:\.[0-9]+)?)\s*(ns|us|µs|ms|s|m|h)`,
+)
+
+func (c *Client) waitForRequestSlot(ctx context.Context) error {
+	c.requestMu.Lock()
+	defer c.requestMu.Unlock()
+
+	if !c.lastRequest.IsZero() {
+		wait := time.Until(c.lastRequest.Add(geminiMinRequestInterval))
+		if wait > 0 {
+			timer := time.NewTimer(wait)
+			defer timer.Stop()
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-timer.C:
+			}
+		}
+	}
+
+	c.lastRequest = time.Now()
+	return nil
+}
+
+func providerErrorFromResponse(resp *http.Response) error {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("gemini: read error response (HTTP %d): %w", resp.StatusCode, err)
+	}
+
+	var payload struct {
+		Error struct {
+			Status  string `json:"status"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(body, &payload)
+
+	providerErr := &ProviderError{
+		StatusCode: resp.StatusCode,
+		Status:     payload.Error.Status,
+		Message:    payload.Error.Message,
+		Body:       string(body),
+	}
+
+	if match := retryAfterPattern.FindStringSubmatch(providerErr.Message); len(match) == 3 {
+		if delay, err := time.ParseDuration(match[1] + match[2]); err == nil {
+			providerErr.RetryAfter = delay
+		}
+	}
+
+	return providerErr
 }

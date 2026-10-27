@@ -47,11 +47,6 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
-type LoginResponse struct {
-	Token string `json:"token"`
-	User  User   `json:"user"`
-}
-
 type UserClaims struct {
 	UserId            uuid.UUID      `json:"user_id"`
 	TenantID          uuid.UUID      `json:"tenant_id"`
@@ -68,4 +63,28 @@ type UserClaims struct {
 
 type RefreshRequest struct {
 	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
+type TenantChoice struct {
+	TenantID uuid.UUID   `json:"tenant_id"`
+	Name     string      `json:"name"`
+	Role     consts.Role `json:"role"`
+}
+
+type LoginResponse struct {
+	Status             string         `json:"status"` // "authenticated" | "tenant_selection_required"
+	Token              string         `json:"token,omitempty"`
+	RefreshToken       string         `json:"refresh_token,omitempty"`
+	TokenType          string         `json:"token_type,omitempty"`
+	ExpiresIn          int64          `json:"expires_in,omitempty"`
+	TenantID           *uuid.UUID     `json:"tenant_id,omitempty"`
+	User               User           `json:"user"`
+	Tenants            []TenantChoice `json:"tenants,omitempty"`
+	SelectionToken     string         `json:"selection_token,omitempty"`
+	SelectionExpiresIn int64          `json:"selection_expires_in,omitempty"`
+}
+
+type SelectTenantRequest struct {
+	SelectionToken string `json:"selection_token" binding:"required"`
+	TenantID       string `json:"tenant_id" binding:"required"`
 }

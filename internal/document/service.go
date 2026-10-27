@@ -24,18 +24,19 @@ import (
 type userReader interface {
 	FindUserByID(ctx context.Context, id uuid.UUID) (*models.User, error)
 	FindUserByEmail(ctx context.Context, email string) (*models.User, error)
+	GetMembership(ctx context.Context, tenantID, userID uuid.UUID) (*models.TenantMember, error)
 }
 type documentMutator interface {
 	CreateDocument(ctx context.Context, document *models.Document) error
 	CreateDocumentVersion(ctx context.Context, version *models.DocumentVersion) error
 	CreateIngestionJob(ctx context.Context, job *models.IngestionJob) error
-	DeleteDocument(ctx context.Context, userID, tenantID, documentID uuid.UUID) error
+	DeleteDocument(ctx context.Context, tenantID, documentID uuid.UUID) error
 }
 
 type documentReader interface {
 	FindBySHA256(ctx context.Context, tenantID uuid.UUID, sha256 string) (*models.Document, error)
 	FindByUserID(ctx context.Context, userID, tenantID uuid.UUID) ([]*models.Document, error)
-	FindDocument(ctx context.Context, documentID uuid.UUID) (*models.Document, error)
+	FindDocument(ctx context.Context, tenantID, documentID uuid.UUID) (*models.Document, error)
 }
 
 type txRunner interface {
@@ -63,6 +64,9 @@ func NewService(b2 objectstorage.Storage, repo *Repository, cfg *models.Config, 
 }
 
 func (s *Service) UploadDocument(ctx context.Context, userID, tenantID uuid.UUID, file *multipart.FileHeader) (*models.UploadResult, error) {
+	if err := s.authorizeTenant(ctx, userID, tenantID); err != nil {
+		return nil, err
+	}
 	if file == nil {
 		return nil, errs.ErrMissingDocument
 	}
@@ -188,6 +192,9 @@ func (s *Service) UploadDocument(ctx context.Context, userID, tenantID uuid.UUID
 }
 
 func (s *Service) ListDocuments(ctx context.Context, userID, tenantID uuid.UUID) ([]*models.Document, error) {
+	if err := s.authorizeTenant(ctx, userID, tenantID); err != nil {
+		return nil, err
+	}
 	if userID == (uuid.UUID{}) {
 		return nil, fmt.Errorf("user ID is required")
 	}
@@ -218,33 +225,61 @@ func (s *Service) ListDocuments(ctx context.Context, userID, tenantID uuid.UUID)
 	return documents, nil
 }
 
-func (s *Service) GetDocument(ctx context.Context, documentID uuid.UUID) (*models.Document, error) {
-	if documentID == (uuid.UUID{}) {
-		return nil, fmt.Errorf("user ID is required")
+func (s *Service) GetDocument(ctx context.Context, userID, tenantID, documentID uuid.UUID) (*models.Document, error) {
+	if documentID == uuid.Nil {
+		return nil, errs.ErrMissingRequiredFields
 	}
 
-	document, err := s.documentReader.FindDocument(ctx, documentID)
+	if err := s.authorizeTenant(ctx, userID, tenantID); err != nil {
+		return nil, err
+	}
+
+	document, err := s.documentReader.FindDocument(ctx, tenantID, documentID)
 	if err != nil {
 		return nil, err
+	}
+	if document == nil {
+		return nil, errs.ErrNotFound
 	}
 
 	for _, version := range document.Versions {
 		if version == nil || version.StorageKey == "" {
 			continue
 		}
-
 		version.StorageURL = s.B2.GetURL(version.StorageKey)
 	}
 
 	return document, nil
 }
 
-func (s *Service) DeleteDocument(ctx context.Context, userID, tetantID, documentID uuid.UUID) error {
-	if userID == (uuid.UUID{}) || documentID == (uuid.UUID{}) {
+func (s *Service) DeleteDocument(ctx context.Context, userID, tenantID, documentID uuid.UUID) error {
+	if tenantID == uuid.Nil || documentID == uuid.Nil {
 		return errs.ErrMissingRequiredFields
 	}
-	if err := s.documentMutator.DeleteDocument(ctx, userID, tetantID, documentID); err != nil {
+
+	if err := s.authorizeTenant(ctx, userID, tenantID); err != nil {
 		return err
 	}
+
+	return s.documentMutator.DeleteDocument(ctx, tenantID, documentID)
+}
+
+func (s *Service) authorizeTenant(ctx context.Context, userID, tenantID uuid.UUID) error {
+	if userID == uuid.Nil || tenantID == uuid.Nil {
+		return errs.ErrUnauthorized
+	}
+
+	membership, err := s.users.GetMembership(ctx, tenantID, userID)
+	if err != nil {
+		if errors.Is(err, errs.ErrNotFound) {
+			return errs.ErrUnauthorized
+		}
+		return fmt.Errorf("verify tenant membership: %w", err)
+	}
+
+	if membership == nil || membership.TenantID != tenantID || membership.UserID != userID {
+		return errs.ErrUnauthorized
+	}
+
 	return nil
 }

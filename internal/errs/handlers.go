@@ -20,88 +20,103 @@ func HTTPStatus(err error) int {
 	// ---------------------------------------------------------------------
 	// 400 Bad Request
 	// ---------------------------------------------------------------------
-
 	case errors.Is(err, ErrInvalidRequest),
 		errors.Is(err, ErrValidation),
+		errors.Is(err, ErrMissingRequiredFields),
+		errors.Is(err, ErrInvalidReference),
+
+		// IDs
 		errors.Is(err, ErrInvalidID),
 		errors.Is(err, ErrMissingID),
+		errors.Is(err, ErrIDRequired),
 		errors.Is(err, ErrMissingUserID),
 		errors.Is(err, ErrMissingDocumentID),
+		errors.Is(err, ErrInvalidTenantID),
+		errors.Is(err, ErrTenantIDRequired),
+
+		// User / auth input
 		errors.Is(err, ErrMissingName),
+		errors.Is(err, ErrMissingUserName),
 		errors.Is(err, ErrMissingPhone),
 		errors.Is(err, ErrMissingEmail),
 		errors.Is(err, ErrInvalidEmail),
 		errors.Is(err, ErrMissingPassword),
 		errors.Is(err, ErrInvalidPassword),
+		errors.Is(err, ErrPasswordMismatch),
+		errors.Is(err, ErrMissingProvider),
+		errors.Is(err, ErrMissingOTP),
+
+		// Pagination, files, queries
+		errors.Is(err, ErrInvalidPage),
+		errors.Is(err, ErrInvalidPageSize),
 		errors.Is(err, ErrInvalidFileExtension),
 		errors.Is(err, ErrInvalidFileSize),
+		errors.Is(err, ErrUnsupportedFileType),
+		errors.Is(err, ErrDocumentTooLarge),
 		errors.Is(err, ErrMissingQuery),
 		errors.Is(err, ErrInvalidQuery),
+		errors.Is(err, ErrEmptyInput),
+
+		// Chat / invitations
 		errors.Is(err, ErrMissingConversationID),
 		errors.Is(err, ErrMissingMessage),
 		errors.Is(err, ErrInvalidMessage),
-		errors.Is(err, ErrInvalidPage),
-		errors.Is(err, ErrInvalidPageSize),
-		errors.Is(err, ErrUnsupportedFileType),
-		errors.Is(err, ErrDocumentTooLarge):
+		errors.Is(err, ErrInvalidTitle),
+		errors.Is(err, ErrInvalidInvitation):
 
 		return http.StatusBadRequest
 
 	// ---------------------------------------------------------------------
 	// 401 Unauthorized
 	// ---------------------------------------------------------------------
-
 	case errors.Is(err, ErrUnauthorized),
 		errors.Is(err, ErrInvalidCredentials),
 		errors.Is(err, ErrInvalidToken),
+		errors.Is(err, ErrInvalidSelectionToken),
 		errors.Is(err, ErrEmailNotVerified),
-		errors.Is(err, ErrCurrentPasswordIncorrect),
-		errors.Is(err, ErrLLMAuthentication),
-		errors.Is(err, ErrEmbeddingAuthentication):
+		errors.Is(err, ErrCurrentPasswordIncorrect):
 
 		return http.StatusUnauthorized
 
 	// ---------------------------------------------------------------------
 	// 403 Forbidden
 	// ---------------------------------------------------------------------
-
 	case errors.Is(err, ErrForbidden),
 		errors.Is(err, ErrAccountDisabled),
-		errors.Is(err, ErrAccountLocked):
+		errors.Is(err, ErrAccountLocked),
+		errors.Is(err, ErrNoTenantMembership),
+		errors.Is(err, ErrTenantAccessDenied):
 
 		return http.StatusForbidden
 
 	// ---------------------------------------------------------------------
 	// 404 Not Found
 	// ---------------------------------------------------------------------
-
 	case errors.Is(err, ErrNotFound):
 
 		return http.StatusNotFound
 
 	// ---------------------------------------------------------------------
+	// 408 Request Timeout
+	// ---------------------------------------------------------------------
+	case errors.Is(err, context.DeadlineExceeded):
+
+		return http.StatusRequestTimeout
+
+	// ---------------------------------------------------------------------
 	// 409 Conflict
 	// ---------------------------------------------------------------------
-
 	case errors.Is(err, ErrAlreadyExists),
 		errors.Is(err, ErrConflict),
+		errors.Is(err, ErrInvitationAlreadyPending),
 		errors.Is(err, ErrDocumentProcessing),
 		errors.Is(err, ErrDocumentAlreadyProcessed):
 
 		return http.StatusConflict
 
 	// ---------------------------------------------------------------------
-	// 408 Request Timeout
-	// ---------------------------------------------------------------------
-
-	case errors.Is(err, context.DeadlineExceeded):
-
-		return http.StatusRequestTimeout
-
-	// ---------------------------------------------------------------------
 	// 422 Unprocessable Entity
 	// ---------------------------------------------------------------------
-
 	case errors.Is(err, ErrDocumentEmpty),
 		errors.Is(err, ErrDocumentInaccessible),
 		errors.Is(err, ErrChunkingFailed):
@@ -111,18 +126,21 @@ func HTTPStatus(err error) int {
 	// ---------------------------------------------------------------------
 	// 429 Too Many Requests
 	// ---------------------------------------------------------------------
-
 	case errors.Is(err, ErrLLMRateLimited),
 		errors.Is(err, ErrEmbeddingRateLimited):
 
 		return http.StatusTooManyRequests
 
 	// ---------------------------------------------------------------------
-	// 502 Bad Gateway
+	// 502 Bad Gateway (upstream provider failures)
 	// ---------------------------------------------------------------------
-
 	case errors.Is(err, ErrLLMGenerationFailed),
+		errors.Is(err, ErrLLMAuthentication),
+		errors.Is(err, ErrLLMInvalidRequest),
 		errors.Is(err, ErrEmbeddingFailed),
+		errors.Is(err, ErrEmbeddingAuthentication),
+		errors.Is(err, ErrEmbeddingInvalidRequest),
+		errors.Is(err, ErrDimensionMismatch),
 		errors.Is(err, ErrRetrievalFailed),
 		errors.Is(err, ErrIndexingFailed),
 		errors.Is(err, ErrVectorSearchFailed):
@@ -132,7 +150,6 @@ func HTTPStatus(err error) int {
 	// ---------------------------------------------------------------------
 	// 503 Service Unavailable
 	// ---------------------------------------------------------------------
-
 	case errors.Is(err, ErrDatabaseUnavailable),
 		errors.Is(err, ErrLLMUnavailable),
 		errors.Is(err, ErrEmbeddingUnavailable),
@@ -144,11 +161,19 @@ func HTTPStatus(err error) int {
 	// ---------------------------------------------------------------------
 	// 504 Gateway Timeout
 	// ---------------------------------------------------------------------
-
 	case errors.Is(err, ErrDatabaseTimeout),
 		errors.Is(err, ErrLLMTimeout):
 
 		return http.StatusGatewayTimeout
+
+	// ---------------------------------------------------------------------
+	// 500 Internal Server Error (explicit, so they're intentional)
+	// ---------------------------------------------------------------------
+	case errors.Is(err, ErrInternal),
+		errors.Is(err, ErrTransactionFailed),
+		errors.Is(err, ErrGenerateToken):
+
+		return http.StatusInternalServerError
 
 	default:
 		return http.StatusInternalServerError

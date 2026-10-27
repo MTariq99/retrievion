@@ -59,6 +59,7 @@ type IntrospectionResponse struct {
 	TenantID  uuid.UUID `json:"tenant_id,omitempty"`
 	UserEmail string    `json:"user_email,omitempty"`
 	UserName  string    `json:"user_name,omitempty"`
+	UserRole  string    `json:"user_role,omitempty"`
 	TokenType string    `json:"token_type,omitempty"`
 	ExpiresAt time.Time `json:"exp,omitempty"`
 	IssuedAt  time.Time `json:"iat,omitempty"`

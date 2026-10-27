@@ -147,58 +147,49 @@ func (r *Repository) CreateIngestionJob(ctx context.Context, job *models.Ingesti
 	return nil
 }
 
-func (r *Repository) FindByUserID(ctx context.Context, userID, tenantID uuid.UUID) ([]*models.Document, error) {
+func (r *Repository) FindByUserID(ctx context.Context, _ uuid.UUID, tenantID uuid.UUID) ([]*models.Document, error) {
+	if tenantID == uuid.Nil {
+		return nil, errs.ErrMissingRequiredFields
+	}
+
 	const query = `
 		SELECT
-			d.id,
-			d.tenant_id,
-			d.name,
-			d.mime_type,
-			d.status,
-			d.created_at,
-			d.updated_at,
-
-			dv.id,
-			dv.document_id,
-			dv.version,
-			dv.created_at
-
+			d.id, d.tenant_id, d.name, d.mime_type, d.status,
+			d.created_at, d.updated_at,
+			dv.id, dv.document_id, dv.version, dv.created_at
 		FROM documents d
-		INNER JOIN document_versions dv
-			ON dv.document_id = d.id
-
-		WHERE d.user_id = $1
-		AND d.tenant_id = $2 AND d.deleted_at IS NULL
-
+		LEFT JOIN document_versions dv ON dv.document_id = d.id
+		WHERE d.tenant_id = $1 AND d.deleted_at IS NULL
 		ORDER BY d.created_at DESC, dv.version DESC
 	`
 
-	rows, err := r.db.QueryContext(ctx, query, userID)
+	rows, err := r.db.QueryContext(ctx, query, tenantID)
 	if err != nil {
 		return nil, errs.RepositoryError(err)
 	}
+	defer rows.Close()
+
 	documents := make([]*models.Document, 0)
 	documentMap := make(map[uuid.UUID]*models.Document)
-	defer rows.Close()
+
 	for rows.Next() {
 		var (
-			documentID uuid.UUID
-			tenantID   uuid.UUID
-			name       string
-			mimeType   string
-			status     consts.DocumentStatus
-			createdAt  time.Time
-			updatedAt  time.Time
-
-			versionID         uuid.UUID
-			versionDocumentID uuid.UUID
-			versionNumber     int
-			versionCreatedAt  time.Time
+			documentID        uuid.UUID
+			rowTenantID       uuid.UUID
+			name              string
+			mimeType          string
+			status            consts.DocumentStatus
+			createdAt         time.Time
+			updatedAt         time.Time
+			versionID         sql.NullString
+			versionDocumentID sql.NullString
+			versionNumber     sql.NullInt64
+			versionCreatedAt  sql.NullTime
 		)
 
 		if err := rows.Scan(
 			&documentID,
-			&tenantID,
+			&rowTenantID,
 			&name,
 			&mimeType,
 			&status,
@@ -213,11 +204,10 @@ func (r *Repository) FindByUserID(ctx context.Context, userID, tenantID uuid.UUI
 		}
 
 		document, exists := documentMap[documentID]
-
 		if !exists {
 			document = &models.Document{
 				ID:        documentID,
-				TenantID:  tenantID,
+				TenantID:  rowTenantID,
 				Name:      name,
 				MimeType:  mimeType,
 				Status:    status,
@@ -225,28 +215,37 @@ func (r *Repository) FindByUserID(ctx context.Context, userID, tenantID uuid.UUI
 				UpdatedAt: updatedAt,
 				Versions:  make([]*models.DocumentVersion, 0),
 			}
-
 			documentMap[documentID] = document
 			documents = append(documents, document)
 		}
 
-		document.Versions = append(
-			document.Versions,
-			&models.DocumentVersion{
-				ID:         versionID,
-				DocumentID: versionDocumentID,
-				Version:    versionNumber,
-				CreatedAt:  versionCreatedAt,
-			},
-		)
-		if err := rows.Err(); err != nil {
-			return nil, errs.RepositoryError(err)
+		if versionID.Valid {
+			versionUUID, err := uuid.Parse(versionID.String)
+			if err != nil {
+				return nil, errs.RepositoryError(err)
+			}
+			versionDocUUID, err := uuid.Parse(versionDocumentID.String)
+			if err != nil {
+				return nil, errs.RepositoryError(err)
+			}
+
+			document.Versions = append(document.Versions, &models.DocumentVersion{
+				ID:         versionUUID,
+				DocumentID: versionDocUUID,
+				Version:    int(versionNumber.Int64),
+				CreatedAt:  versionCreatedAt.Time,
+			})
 		}
 	}
+
+	if err := rows.Err(); err != nil {
+		return nil, errs.RepositoryError(err)
+	}
+
 	return documents, nil
 }
 
-func (r *Repository) FindDocument(ctx context.Context, documentID uuid.UUID) (*models.Document, error) {
+func (r *Repository) FindDocument(ctx context.Context, tenantID, documentID uuid.UUID) (*models.Document, error) {
 	const query = `
 		SELECT
 			d.id,
@@ -270,8 +269,10 @@ func (r *Repository) FindDocument(ctx context.Context, documentID uuid.UUID) (*m
 		INNER JOIN document_versions dv
 			ON dv.document_id = d.id
 
-		WHERE d.id = $1 AND deleted_at is NULL
-		LIMIT 1
+				WHERE d.id = $1
+				AND d.tenant_id = $2
+				AND d.deleted_at IS NULL
+				LIMIT 1
 	`
 
 	var document models.Document
@@ -281,6 +282,7 @@ func (r *Repository) FindDocument(ctx context.Context, documentID uuid.UUID) (*m
 		ctx,
 		query,
 		documentID,
+		tenantID,
 	).Scan(
 		&document.ID,
 		&document.TenantID,
@@ -314,30 +316,20 @@ func (r *Repository) FindDocument(ctx context.Context, documentID uuid.UUID) (*m
 	return &document, nil
 }
 
-func (r *Repository) DeleteDocument(ctx context.Context, userID, tenantID, documentID uuid.UUID) error {
-	if userID == (uuid.UUID{}) ||
-		tenantID == (uuid.UUID{}) ||
-		documentID == (uuid.UUID{}) {
+func (r *Repository) DeleteDocument(ctx context.Context, tenantID, documentID uuid.UUID) error {
+	if tenantID == uuid.Nil || documentID == uuid.Nil {
 		return errs.ErrMissingRequiredFields
 	}
 
 	const query = `
 		UPDATE documents
-		SET deleted_at = NOW(),
-		    updated_at = NOW()
+		SET deleted_at = NOW(), updated_at = NOW()
 		WHERE id = $1
-		  AND user_id = $2
-		  AND tenant_id = $3
+		  AND tenant_id = $2
 		  AND deleted_at IS NULL
 	`
 
-	result, err := r.db.ExecContext(
-		ctx,
-		query,
-		documentID,
-		userID,
-		tenantID,
-	)
+	result, err := r.q.ExecContext(ctx, query, documentID, tenantID)
 	if err != nil {
 		return errs.RepositoryError(err)
 	}
@@ -346,7 +338,6 @@ func (r *Repository) DeleteDocument(ctx context.Context, userID, tenantID, docum
 	if err != nil {
 		return errs.RepositoryError(err)
 	}
-
 	if rowsAffected == 0 {
 		return errs.ErrNotFound
 	}

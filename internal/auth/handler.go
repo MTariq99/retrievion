@@ -170,3 +170,21 @@ func (h *Handler) IssueServiceToken(c *gin.Context) {
 		},
 	)
 }
+
+func (h *Handler) SelectTenant(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+	defer cancel()
+
+	var req models.SelectTenantRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errs.HandlerError(c, err)
+		return
+	}
+
+	resp, err := h.AuthService.SelectTenant(ctx, req, c.ClientIP(), c.Request.UserAgent())
+	if err != nil {
+		errs.HandlerError(c, err)
+		return
+	}
+	response.WriteSuccessResponse(c, "tenant selected", resp)
+}

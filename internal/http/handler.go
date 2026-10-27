@@ -52,6 +52,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 		authRoutes.POST("/refresh", h.Auth.Refresh)
 		authRoutes.POST("/logout", h.Auth.Logout)
 		authRoutes.POST("/service/token", h.Auth.IssueServiceToken)
+		authRoutes.POST("/select-tenant", h.Auth.SelectTenant)
 	}
 	api := r.Group("/api/v1")
 	api.Use(h.phantom.ExchangeOpaqueForJWT())

@@ -13,4 +13,7 @@ var (
 	ErrMissingProvider          = errors.New("provider is required")
 	ErrMissingOTP               = errors.New("OTP is required")
 	ErrMissingUserName          = errors.New("user name is required")
+	ErrNoTenantMembership       = errors.New("account has no workspace membership")
+	ErrInvalidSelectionToken    = errors.New("invalid or expired selection token")
+	ErrTenantAccessDenied       = errors.New("no access to the selected workspace")
 )

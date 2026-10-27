@@ -40,30 +40,19 @@ func (r *Repository) CreateUser(ctx context.Context, u *models.User) error {
 
 func (r *Repository) FindUserByEmail(ctx context.Context, email string) (*models.User, error) {
 	const query = `
-		SELECT u.id, u.email, u.password_hash, u.name, u.created_at, u.updated_at,
-		       (
-		           SELECT tm.tenant_id
-		           FROM tenant_members tm
-		           WHERE tm.user_id = u.id
-		           AND (SELECT COUNT(*) FROM tenant_members WHERE user_id = u.id) = 1
-		           LIMIT 1
-		       ) AS tenant_id
-		FROM users u
-		WHERE u.email = $1
-	`
+	SELECT u.id, u.email, u.password_hash, u.name, u.role, u.created_at, u.updated_at
+	FROM users u
+	WHERE lower(u.email) = lower($1) AND u.deleted_at IS NULL
+`
 	var u models.User
-	var tenantID uuid.NullUUID
 	err := r.db.QueryRowContext(ctx, query, email).Scan(
-		&u.ID, &u.Email, &u.PasswordHash, &u.Name, &u.CreatedAt, &u.UpdatedAt, &tenantID,
+		&u.ID, &u.Email, &u.PasswordHash, &u.Name, &u.Role, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errs.ErrNotFound
 		}
 		return nil, errs.RepositoryError(err)
-	}
-	if tenantID.Valid {
-		u.TenantID = tenantID.UUID
 	}
 	return &u, nil
 }
@@ -264,4 +253,32 @@ func isUniqueViolation(err error) bool {
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "duplicate key value") || strings.Contains(msg, "SQLSTATE 23505")
+}
+
+func (r *Repository) GetUserTenantChoices(ctx context.Context, userID uuid.UUID) ([]models.TenantChoice, error) {
+	const query = `
+		SELECT tm.tenant_id, t.name, tm.role
+		FROM tenant_members tm
+		JOIN tenants t ON t.id = tm.tenant_id
+		WHERE tm.user_id = $1
+		ORDER BY tm.created_at ASC
+	`
+	rows, err := r.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, errs.RepositoryError(err)
+	}
+	defer rows.Close()
+
+	var out []models.TenantChoice
+	for rows.Next() {
+		var c models.TenantChoice
+		if err := rows.Scan(&c.TenantID, &c.Name, &c.Role); err != nil {
+			return nil, errs.RepositoryError(err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, errs.RepositoryError(err)
+	}
+	return out, nil
 }

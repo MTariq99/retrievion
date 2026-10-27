@@ -2,7 +2,7 @@
 
 **retrievion** is a multi-tenant Retrieval-Augmented Generation (RAG) backend built with Go.
 
-It provides asynchronous PDF ingestion, hybrid semantic/keyword retrieval, grounded LLM responses, citations, streaming chat, conversation persistence, evaluation, and production-oriented observability.
+It provides asynchronous PDF ingestion, hybrid semantic/keyword retrieval, grounded LLM responses, citations, streaming chat, conversation persistence, tenant invitations, evaluation, and production-oriented observability.
 
 The project is designed around a simple principle:
 
@@ -67,6 +67,56 @@ The project is designed around a simple principle:
                                                      │
                                                      ▼
                                           messages + sources
+```
+
+### Tenant invitation flow
+
+```text
+                         ┌─────────────────┐
+                         │  Tenant owner   │
+                         └────────┬────────┘
+                                  │ POST /api/v1/tenants/invitations
+                                  ▼
+                         ┌─────────────────┐
+                         │    Go / Gin     │
+                         │      API        │
+                         └────────┬────────┘
+                                  ▼
+                       Owner authorization check
+                                  │
+                                  ▼
+                  Validate emails / roles / duplicates
+                                  │
+                                  ▼
+                  Generate token + SHA-256 token hash
+                                  │
+                                  ▼
+                    PostgreSQL transaction (all or none)
+                    tenant_invitations (status = pending)
+                                  │
+                                  ▼
+                  RabbitMQ publish (broker-confirmed)
+                    exchange: invitations
+                                  │
+                                  ▼
+                       202 Accepted to the client
+
+   ┌──────────────────────── RabbitMQ ────────────────────────┐
+   │ invitations.email        main queue                      │
+   │ invitations.email.retry  30s TTL, dead-letters back      │
+   │ invitations.email.dead   parking lot after max attempts  │
+   └───────────────────────────────┬──────────────────────────┘
+                                   ▼
+                          Invitation Worker
+                                   │
+                    ┌──────────────┼───────────────┐
+                    ▼              ▼               ▼
+                 Success     Transient failure   Permanent failure
+                  (ack)      (retry, max 5)      (dead queue)
+                                   │
+                                   ▼
+                        Invitation email sent
+                  (link carries the raw one-time token)
 ```
 
 For deeper architectural details, see [`docs/architecture.md`](docs/architecture.md).
@@ -166,6 +216,53 @@ Streaming events include:
 * `message_complete`
 * `error`
 
+### Tenant invitations
+
+Tenant owners can invite multiple users in a single request.
+
+```text
+Owner request
+    ↓
+Verify caller is the tenant owner
+    ↓
+Validate emails, roles, and duplicates
+    ↓
+Generate one-time tokens
+    ↓
+Store token hashes (single transaction)
+    ↓
+Queue invitation emails
+    ↓
+Return 202 Accepted
+    ↓
+Worker sends emails with retries
+```
+
+* Owner-only invitations
+* Invitable roles: `admin`, `member`, `viewer`
+* Batch invitations stored atomically: all succeed or none do
+* Emails normalized to lowercase and validated
+* Duplicate emails in a single request are rejected
+* One pending invitation per tenant and email, enforced by a partial unique index
+* Expired-but-pending invitations are revoked automatically so re-inviting is not blocked
+* 24-hour invitation lifetime
+* Email delivery is asynchronous, so request latency does not depend on the mail provider
+* Broker-confirmed publishing, so queued invitations are not silently dropped
+* Retry queue with a 30-second delay, up to 5 attempts
+* Dead-letter queue for permanently failed or exhausted messages
+
+#### Invitation tokens
+
+The raw token exists only in the invitation email link. The database stores the SHA-256 digest only:
+
+```text
+raw token  ──► email link
+    │
+    └─► SHA-256 ──► tenant_invitations.token_hash (BYTEA, unique)
+```
+
+A database leak therefore does not expose usable invitation links.
+
 ---
 
 ## Grounded Responses and Citations
@@ -247,6 +344,7 @@ Stores:
 
 * tenants
 * users and tenant memberships
+* tenant invitations
 * documents
 * document versions
 * document chunks
@@ -287,11 +385,19 @@ Redis is used for:
 
 ### RabbitMQ
 
-RabbitMQ provides asynchronous document ingestion.
+RabbitMQ provides asynchronous document ingestion and tenant invitation email delivery.
 
 The ingestion queue is durable and failures are routed to a dead-letter queue.
 
-The current worker does **not** automatically requeue failed jobs.
+The current ingestion worker does **not** automatically requeue failed jobs.
+
+The invitation pipeline uses a separate exchange and does retry:
+
+| Queue                     | Purpose                                          |
+| ------------------------- | ------------------------------------------------ |
+| `invitations.email`       | Pending invitation emails                        |
+| `invitations.email.retry` | Delay queue (30s TTL), dead-letters back to main |
+| `invitations.email.dead`  | Messages that failed permanently or hit 5 tries  |
 
 ---
 
@@ -324,6 +430,20 @@ user_id + tenant_id
 ```
 
 Retrieval is currently tenant-scoped.
+
+Users join a tenant through an invitation issued by the tenant owner:
+
+```text
+Owner ──► invitation (tenant_id, email, role, token_hash, expires_at)
+                │
+                ▼
+         email with one-time link
+                │
+                ▼
+      invitee accepts ──► tenant_members row with the invited role
+```
+
+Invitation status moves through `pending` → `accepted` or `revoked`. A database constraint ensures acceptance metadata is only set on accepted invitations.
 
 ---
 
@@ -392,15 +512,66 @@ Streaming requests are not retried after tokens have already started reaching th
 
 ## Evaluation
 
-retrievion includes an evaluation pipeline for measuring retrieval quality and answer groundedness.
+retrievion includes an evaluation pipeline for measuring retrieval quality and answer groundedness. Evaluation runs and results are persisted in PostgreSQL.
 
 ### Retrieval metrics
 
 The evaluator calculates:
 
-* Precision@K
-* Recall@K
-* Mean Reciprocal Rank (MRR)
+- Precision@K
+- Recall@K
+- HitRate@K
+- Normalized Discounted Cumulative Gain (NDCG@K)
+
+Evaluation cases are scoped to the selected tenant. Cases with a `NULL` tenant ID are treated as global and excluded from tenant-scoped runs.
+
+### Running an evaluation
+
+#### Prerequisites
+
+- Start PostgreSQL and the other required infrastructure services.
+- Configure the application environment, including valid Gemini API credentials.
+- Start the API at least once so database migrations are applied.
+
+#### Prepare the evaluation fixtures
+
+Run:
+
+```bash
+make eval-setup
+```
+
+This command creates or reuses a dedicated evaluation tenant and user, validates tenant membership, and prepares a repeatable fixture dataset containing embedded chunks. It does not require Backblaze B2 for the evaluation fixtures.
+
+Gemini API access is required when fixture embeddings need to be generated. Existing fixture embeddings are reused when the fixtures are already up to date.
+
+#### Run the evaluation
+
+Run the default fixture dataset:
+
+```bash
+make eval
+```
+
+The target runs the setup command first, resolves the evaluation tenant and user IDs, and then runs the evaluator. The default dataset is `resume-smoke-fixture-v1`, and the default retrieval cutoff is `K=10`.
+
+You can override the dataset and cutoff:
+
+```bash
+EVAL_DATASET=resume-smoke-fixture-v1 \
+EVAL_K=10 \
+make eval
+```
+
+You can also specify an existing evaluation tenant and user:
+
+```bash
+EVAL_TENANT_ID=<tenant-uuid> \
+EVAL_USER_ID=<user-uuid> \
+make eval
+```
+
+The supplied user must have valid membership in the selected tenant.
 
 ### Faithfulness evaluation
 
@@ -414,7 +585,8 @@ Retrieval
    │
    ├── Precision@K
    ├── Recall@K
-   └── MRR
+   ├── HitRate@K
+   └── NDCG@K
    │
    ▼
 Generate answer
@@ -431,16 +603,21 @@ The current faithfulness threshold is `0.7`.
 
 The judge stores both:
 
-* faithfulness score
-* judge reasoning
+- faithfulness score
+- judge reasoning
 
-This makes the evaluation result auditable rather than treating an LLM-generated score as unquestionable ground truth.
+This makes evaluation results auditable rather than treating an LLM-generated score as unquestionable ground truth.
 
-Evaluation runs and results are persisted in PostgreSQL.
+Baseline comparison is supported for detecting quality regressions.
 
-Baseline comparison is also supported for detecting quality regressions.
+### Interpreting results
 
----
+A run may be incomplete if individual cases fail or the LLM provider rejects requests. In particular, Gemini rate limits and exhausted daily quotas can prevent all cases from being evaluated.
+
+Do not interpret a partial run as a successful evaluation. Check the evaluated and failed case counts, resolve provider or application errors, and rerun the evaluation before using its results to support quality claims.
+
+Automated CI evaluation gates are not currently implemented.
+
 
 ## Observability
 
@@ -512,6 +689,7 @@ The application is split into two processes:
 │ Documents             │
 │ Conversations         │
 │ Chat                  │
+│ Tenant invitations    │
 └───────────┬───────────┘
             │
             │ RabbitMQ
@@ -523,12 +701,13 @@ The application is split into two processes:
 │ Chunking              │
 │ Embeddings            │
 │ Chunk persistence     │
+│ Invitation emails     │
 └───────────────────────┘
 ```
 
 The API runs database migrations during startup.
 
-The worker consumes ingestion jobs and gracefully drains in-flight work during shutdown.
+The worker consumes ingestion jobs and invitation email jobs concurrently, and gracefully drains in-flight work during shutdown.
 
 ---
 
@@ -549,6 +728,7 @@ The worker consumes ingestion jobs and gracefully drains in-flight work during s
 | LLM              | Gemini                            |
 | Streaming        | Server-Sent Events                |
 | Authentication   | Redis opaque tokens + Ed25519 JWT |
+| Email delivery   | Async via RabbitMQ worker         |
 | Metrics          | Prometheus                        |
 | Tracing          | OpenTelemetry                     |
 | Error monitoring | Sentry                            |
@@ -608,7 +788,7 @@ In a second terminal:
 go run ./cmd/worker
 ```
 
-The worker consumes document-ingestion jobs from RabbitMQ.
+The worker consumes document-ingestion jobs and invitation email jobs from RabbitMQ.
 
 ---
 
@@ -626,7 +806,7 @@ It provides:
 * Redis
 * RabbitMQ
 * API
-* ingestion worker
+* worker (ingestion and invitation emails)
 
 Persistent Docker volumes are configured for the infrastructure services.
 
@@ -657,9 +837,11 @@ retrievion/
 │   ├── ingestion/
 │   ├── llm/
 │   ├── middleware/
+│   ├── notifications/
 │   ├── prompt/
 │   ├── retrieval/
 │   ├── storage/
+│   ├── tenants/
 │   └── tokenizer/
 │
 ├── migrations/
@@ -705,6 +887,16 @@ PDF parsing and embedding generation are comparatively expensive operations.
 
 Moving them behind RabbitMQ keeps document upload requests short and allows ingestion workers to process documents independently from the API.
 
+### Why asynchronous invitation emails?
+
+Sending email inside the request made invitations take 3 to 12 seconds, bounded by the mail provider.
+
+The invitation is committed to PostgreSQL first, then the email job is published to RabbitMQ and the API returns `202 Accepted`. The worker handles delivery with retries, so a slow or temporarily unavailable mail provider no longer affects API latency, and transient failures are retried instead of surfacing to the caller.
+
+### Why hash invitation tokens?
+
+The invitation token is a bearer credential. Storing only its SHA-256 digest means database access alone cannot be used to accept an invitation.
+
 ### Why opaque tokens?
 
 Clients never need to handle the application's internal JWT format.
@@ -727,6 +919,9 @@ The current implementation does **not** include:
 * fully fine-grained per-document retrieval permissions
 * automated CI/CD evaluation gating
 * Kubernetes deployment manifests
+* a transactional outbox for invitations: if the database commit succeeds but RabbitMQ is unreachable, the invitation exists but no email is queued
+* a resend-invitation endpoint
+* exactly-once invitation emails: delivery is at least once, so a worker crash between send and ack can produce a duplicate email
 
 These are potential extensions rather than features represented as currently implemented.
 
@@ -747,6 +942,9 @@ Potential future improvements include:
 * Kubernetes deployment
 * richer caching strategies
 * improved evaluation datasets and judge calibration
+* resend / revoke invitation endpoints
+* transactional outbox for invitation delivery
+* idempotency key check in the invitation worker
 
 ---
 

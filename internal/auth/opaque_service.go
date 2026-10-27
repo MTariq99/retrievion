@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mtariq99/retrievion/internal/consts"
+	"github.com/mtariq99/retrievion/internal/enums"
 	"github.com/mtariq99/retrievion/internal/storage"
 	"github.com/mtariq99/retrievion/models"
 )
@@ -122,6 +123,7 @@ func (s *OpaqueTokenService) IntrospectToken(ctx context.Context, tokenID string
 		IssuedAt:  token.IssuedAt,
 		Scopes:    token.Scopes,
 		TenantID:  token.TenantID,
+		UserRole:  token.UserRole,
 	}, nil
 }
 
@@ -143,6 +145,7 @@ func (s *OpaqueTokenService) RefreshAccessToken(ctx context.Context, refreshToke
 		ID:    refreshToken.UserID,
 		Name:  refreshToken.UserName,
 		Email: refreshToken.UserEmail,
+		Role:  enums.UserRole(refreshToken.UserRole),
 	}
 
 	accessToken, err := s.generateOpaqueToken(ctx, user, refreshToken.TenantID, "access", s.config.AccessTokenTTL, clientIP, userAgent)

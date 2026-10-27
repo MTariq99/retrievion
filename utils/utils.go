@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/mtariq99/retrievion/internal/consts"
+	"github.com/mtariq99/retrievion/internal/enums"
 	"github.com/mtariq99/retrievion/models"
 )
 
@@ -75,6 +76,15 @@ func GetUserClaims(c *gin.Context) (*models.UserClaims, bool) {
 		return nil, false
 	}
 
+	userRoleVal, exists := c.Get(consts.UserRole)
+	if !exists {
+		return nil, false
+	}
+	userRole, ok := userRoleVal.(enums.UserRole)
+	if !ok {
+		return nil, false
+	}
+
 	claims := &models.UserClaims{
 		UserId:            userId,
 		UserEmail:         userEmail,
@@ -82,6 +92,7 @@ func GetUserClaims(c *gin.Context) (*models.UserClaims, bool) {
 		TenantID:          tenantId,
 		IsService:         IsService,
 		ClientID:          clientID,
+		UserRole:          userRole,
 	}
 
 	return claims, true
@@ -114,4 +125,10 @@ func UnixToTime(sec int64) time.Time {
 
 func B2ObjectKey(tenantID, documentID, versionID uuid.UUID, filename string) string {
 	return fmt.Sprintf("tenants/%s/documents/%s/versions/%s/%s", tenantID, documentID, versionID, filename)
+}
+
+// Only the SHA-256 of the token is stored, so a Redis leak can't be replayed.
+func ChallengeKey(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return consts.LoginChallengePrefix + hex.EncodeToString(sum[:])
 }

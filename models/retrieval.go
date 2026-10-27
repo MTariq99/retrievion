@@ -42,3 +42,8 @@ type RetrievedChunk struct {
 type Result struct {
 	Chunks []RetrievedChunk
 }
+
+type Candidate struct {
+	Chunk RetrievedChunk
+	Score float64
+}

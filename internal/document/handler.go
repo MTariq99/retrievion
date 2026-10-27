@@ -87,7 +87,7 @@ func (h *Handler) GetDocument(c *gin.Context) {
 		errs.HandlerError(c, err)
 		return
 	}
-	document, err := h.service.GetDocument(ctx, parsedDocumentID)
+	document, err := h.service.GetDocument(ctx, user.UserId, user.TenantID, parsedDocumentID)
 	if err != nil {
 		errs.HandlerError(c, err)
 		return

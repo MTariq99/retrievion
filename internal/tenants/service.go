@@ -61,9 +61,13 @@ func (ts *TenantService) InviteUsers(ctx context.Context, ownerTenantID, userID 
 
 	membership, err := ts.userReader.GetMembership(ctx, ownerTenantID, userID)
 	if err != nil {
-		return err
+		if errors.Is(err, errs.ErrNotFound) {
+			return errs.ErrUnauthorized
+		}
+		return fmt.Errorf("verify tenant membership: %w", err)
 	}
-	if membership.Role != consts.RoleOwner {
+
+	if membership == nil || membership.TenantID != ownerTenantID || membership.UserID != userID || membership.Role != consts.RoleOwner {
 		return errs.ErrUnauthorized
 	}
 

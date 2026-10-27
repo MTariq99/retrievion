@@ -30,6 +30,9 @@ func WithTenantID(ctx context.Context, id string) context.Context {
 
 func FromContext(ctx context.Context) *slog.Logger {
 	l := base
+	if l == nil {
+		l = slog.Default()
+	}
 	if v, ok := ctx.Value(consts.RequestIDKey).(string); ok && v != "" {
 		l = l.With("request_id", v)
 	}

@@ -262,11 +262,7 @@ func (s *Service) StreamChat(ctx context.Context, userID, tenantID uuid.UUID, re
 	}, nil
 }
 
-func (s *Service) buildBoundedContext(
-	conv *models.Conversation,
-	query string,
-	results []models.RetrievedChunk,
-) string {
+func (s *Service) buildBoundedContext(conv *models.Conversation, query string, results []models.RetrievedChunk) string {
 	overhead := s.prompt.SystemPromptTokens()
 
 	if conv.Summary != nil {

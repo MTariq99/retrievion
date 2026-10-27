@@ -13,6 +13,7 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/mtariq99/retrievion/internal/auth"
 	"github.com/mtariq99/retrievion/internal/consts"
+	"github.com/mtariq99/retrievion/internal/enums"
 	"github.com/mtariq99/retrievion/models"
 	"go.uber.org/zap"
 )
@@ -90,7 +91,7 @@ func (m *PhantomTokenMiddleware) ExchangeOpaqueForJWT() gin.HandlerFunc {
 		c.Set(consts.TenantID, introspection.TenantID)
 		c.Set(consts.IsService, introspection.IsService)
 		c.Set(consts.ClientID, introspection.ClientID)
-
+		c.Set(consts.UserRole, enums.UserRole(introspection.UserRole))
 		c.Next()
 	}
 }
@@ -104,6 +105,7 @@ func (m *PhantomTokenMiddleware) generateInternalJWT(introspection *models.Intro
 		TenantID:  introspection.TenantID,
 		IsService: introspection.IsService,
 		ClientID:  introspection.ClientID,
+		UserRole:  enums.UserRole(introspection.UserRole),
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(5 * time.Minute)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

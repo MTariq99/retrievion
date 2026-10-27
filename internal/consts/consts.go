@@ -37,16 +37,20 @@ const (
 // ============================================================
 
 const (
-	Authorization   = "Authorization"
-	OpaqueTokenID   = "opaque_token_id"
-	UserID          = "user_id"
-	UserEmail       = "user_email"
-	TenantID        = "tenant_id"
-	IsService       = "is_service"
-	ClientID        = "client_id"
-	AccessTokenTTL  = 24 * time.Hour
-	RefreshTokenTTL = 7 * 24 * time.Hour
-	TokenPrefix     = "tok_"
+	Authorization        = "Authorization"
+	OpaqueTokenID        = "opaque_token_id"
+	UserID               = "user_id"
+	UserEmail            = "user_email"
+	TenantID             = "tenant_id"
+	IsService            = "is_service"
+	ClientID             = "client_id"
+	UserRole             = "user_role"
+	AccessTokenTTL       = 24 * time.Hour
+	RefreshTokenTTL      = 7 * 24 * time.Hour
+	TokenPrefix          = "tok_"
+	LoginChallengeTTL    = 5 * time.Minute
+	LoginChallengePrefix = "login_challenge:"
+	TokenSelectionPrefix = "sel_"
 )
 
 type ContextKey string

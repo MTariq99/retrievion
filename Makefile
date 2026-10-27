@@ -3,7 +3,7 @@
         docker-restart docker-build docker-logs docker-logs-api \
         docker-logs-worker docker-ps docker-down-volumes \
         docker-api docker-worker docker-postgres docker-redis \
-        docker-rabbitmq
+        docker-rabbitmq eval eval-setup
 
 # --------------------------------------------------
 # Project configuration
@@ -48,6 +48,9 @@ help: ## Show available commands
 	@echo "  make docker-stop         Stop containers"
 	@echo "  make docker-down         Stop and remove containers"
 	@echo "  make docker-down-volumes Remove containers and volumes (DESTRUCTIVE)"
+	@echo "Evaluation - Available Commands"
+	@echo "  make eval                Set up and run tenant-scoped retrieval evaluation"
+	@echo "  make eval-setup          Create or reuse evaluation identity and fixtures"
 	@echo ""
 
 # --------------------------------------------------
@@ -147,3 +150,25 @@ docker-down-volumes: ## Remove containers and volumes (DESTRUCTIVE)
 	else \
 		echo "Cancelled."; \
 	fi
+
+eval: ## Run tenant-scoped retrieval evaluation
+	@set -eu; \
+	setup_output="$$(go run ./cmd/eval-setup)"; \
+	printf '%s\n' "$$setup_output"; \
+	setup_tenant="$$(printf '%s\n' "$$setup_output" | sed -n 's/^Tenant ID: //p' | tail -n 1)"; \
+	setup_user="$$(printf '%s\n' "$$setup_output" | sed -n 's/^User ID:[[:space:]]*//p' | tail -n 1)"; \
+	tenant_id="$(EVAL_TENANT_ID)"; \
+	user_id="$(EVAL_USER_ID)"; \
+	dataset="$(or $(EVAL_DATASET),resume-smoke-fixture-v1)"; \
+	tenant_id="$${tenant_id:-$$setup_tenant}"; \
+	user_id="$${user_id:-$$setup_user}"; \
+	test -n "$$tenant_id" || (echo "Error: could not resolve evaluation tenant ID"; exit 1); \
+	test -n "$$user_id" || (echo "Error: could not resolve evaluation user ID"; exit 1); \
+	go run ./cmd/eval \
+		--dataset "$$dataset" \
+		--tenant-id "$$tenant_id" \
+		--eval-user-id "$$user_id" \
+		--k "$(or $(EVAL_K),10)"
+
+eval-setup: ## Create or reuse evaluation identity and embedded fixtures
+	go run ./cmd/eval-setup

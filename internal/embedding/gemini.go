@@ -60,11 +60,9 @@ func (g *GeminiProvider) Embed(ctx context.Context, texts []string) ([][]float32
 	reqBody := geminiBatchRequest{Requests: make([]geminiEmbedRequest, len(texts))}
 	for i, t := range texts {
 		reqBody.Requests[i] = geminiEmbedRequest{
-			Model:   "models/" + g.model,
-			Content: geminiContent{Parts: []geminiPart{{Text: t}}},
-			EmbedContentConfig: geminiEmbedContentConfig{
-				OutputDimensionality: g.dimension,
-			},
+			Model:                "models/" + g.model,
+			Content:              geminiContent{Parts: []geminiPart{{Text: t}}},
+			OutputDimensionality: g.dimension,
 		}
 	}
 
@@ -121,13 +119,9 @@ type geminiBatchRequest struct {
 }
 
 type geminiEmbedRequest struct {
-	Model              string                   `json:"model"`
-	Content            geminiContent            `json:"content"`
-	EmbedContentConfig geminiEmbedContentConfig `json:"embedContentConfig"`
-}
-
-type geminiEmbedContentConfig struct {
-	OutputDimensionality int `json:"outputDimensionality"`
+	Model                string        `json:"model"`
+	Content              geminiContent `json:"content"`
+	OutputDimensionality int           `json:"outputDimensionality"`
 }
 
 type geminiContent struct {

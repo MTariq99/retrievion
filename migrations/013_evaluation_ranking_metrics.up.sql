@@ -1,0 +1,7 @@
+ALTER TABLE eval_runs
+ADD COLUMN avg_hit_rate_at_k DOUBLE PRECISION,
+ADD COLUMN avg_ndcg_at_k DOUBLE PRECISION;
+
+ALTER TABLE eval_results
+ADD COLUMN hit_rate_at_k DOUBLE PRECISION,
+ADD COLUMN ndcg_at_k DOUBLE PRECISION;

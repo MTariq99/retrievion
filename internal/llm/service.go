@@ -44,12 +44,25 @@ func (s *Service) Generate(ctx context.Context, prompt string) (models.GenerateR
 	for attempt := 0; attempt <= consts.LLMMaxRetries; attempt++ {
 		if attempt > 0 {
 			delay := backoffWithJitter(attempt)
-			s.logger.Warn("retrying llm generate",
-				zap.Int("attempt", attempt), zap.Duration("delay", delay), zap.Error(lastErr))
+
+			var providerErr *ProviderError
+			if errors.As(lastErr, &providerErr) && providerErr.RetryAfter > delay {
+				delay = providerErr.RetryAfter
+			}
+
+			s.logger.Warn("retrying llm generate", zap.Int("attempt", attempt), zap.Duration("delay", delay), zap.Error(lastErr))
+
+			timer := time.NewTimer(delay)
 			select {
 			case <-callCtx.Done():
-				return models.GenerateResponse{}, callCtx.Err()
-			case <-time.After(delay):
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				return models.GenerateResponse{}, fmt.Errorf("llm retry wait canceled: %w (previous error: %v)", callCtx.Err(), lastErr)
+			case <-timer.C:
 			}
 		}
 

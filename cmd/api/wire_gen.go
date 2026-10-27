@@ -50,7 +50,7 @@ func InitializeAPI(db *sql.DB, logger *zap.Logger) (*http.Handler, func(), error
 		return nil, nil, err
 	}
 	repository := auth.NewRepository(db)
-	service := auth.NewService(repository, modelsConfig, opaqueTokenService)
+	service := auth.NewService(repository, modelsConfig, opaqueTokenService, redisClient)
 	serviceClientRepository := auth.NewClientServiceRepository(db)
 	clientService := auth.NewClientService(serviceClientRepository, opaqueTokenService)
 	handler := auth.NewHandler(opaqueTokenService, service, modelsConfig, clientService)

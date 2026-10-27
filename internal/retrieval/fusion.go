@@ -11,9 +11,7 @@ type Fusion struct {
 }
 
 func NewFusion() *Fusion {
-	return &Fusion{
-		K: 60,
-	}
+	return &Fusion{K: 60}
 }
 
 type ResultFusion interface {
@@ -26,51 +24,39 @@ func (f *Fusion) Fuse(vectorResults, keywordResults []models.RetrievedChunk) []m
 		score float64
 	}
 
+	k := f.K
+	if k <= 0 {
+		k = 60
+	}
+
 	candidates := make(map[string]*candidate)
 
-	for rank, chunk := range vectorResults {
-		key := chunk.ChunkID.String()
+	addResults := func(chunks []models.RetrievedChunk) {
+		for rank, chunk := range chunks {
+			key := chunk.ChunkID.String()
 
-		item, exists := candidates[key]
-		if !exists {
-			item = &candidate{
-				chunk: chunk,
+			item, exists := candidates[key]
+			if !exists {
+				item = &candidate{chunk: chunk}
+				candidates[key] = item
 			}
 
-			candidates[key] = item
+			item.score += 1.0 / float64(k+rank+1)
 		}
-
-		item.score += 1.0 / float64(f.K+rank+1)
 	}
 
-	for rank, chunk := range keywordResults {
-		key := chunk.ChunkID.String()
-
-		item, exists := candidates[key]
-		if !exists {
-			item = &candidate{
-				chunk: chunk,
-			}
-
-			candidates[key] = item
-		}
-
-		item.score += 1.0 / float64(f.K+rank+1)
-	}
+	addResults(vectorResults)
+	addResults(keywordResults)
 
 	results := make([]models.RetrievedChunk, 0, len(candidates))
-
-	for _, candidate := range candidates {
-		candidate.chunk.Score = candidate.score
-		results = append(results, candidate.chunk)
+	for _, item := range candidates {
+		item.chunk.Score = item.score
+		results = append(results, item.chunk)
 	}
 
-	sort.Slice(
-		results,
-		func(i, j int) bool {
-			return results[i].Score > results[j].Score
-		},
-	)
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
 
 	return results
 }

@@ -11,10 +11,15 @@ import (
 )
 
 type Retriever interface {
-	Retrieve(
-		ctx context.Context,
-		query models.RetrievalQuery,
-	) ([]models.RetrievedChunk, error)
+	Retrieve(ctx context.Context, query models.RetrievalQuery) ([]models.RetrievedChunk, error)
+}
+
+type Reranker interface {
+	Rerank(ctx context.Context, query string, candidates []models.RetrievedChunk) ([]models.RetrievedChunk, error)
+}
+
+type KeywordSearcher interface {
+	Search(ctx context.Context, tenantID uuid.UUID, userID uuid.UUID, query string, limit int) ([]models.RetrievedChunk, error)
 }
 
 type Service struct {
@@ -24,12 +29,7 @@ type Service struct {
 	reranker        Reranker
 }
 
-func NewService(
-	vectorSearcher VectorSearcher,
-	keywordSearcher KeywordSearcher,
-	fusion ResultFusion,
-	reranker Reranker,
-) *Service {
+func NewService(vectorSearcher VectorSearcher, keywordSearcher KeywordSearcher, fusion ResultFusion, reranker Reranker) *Service {
 	return &Service{
 		vectorSearcher:  vectorSearcher,
 		keywordSearcher: keywordSearcher,
@@ -38,10 +38,7 @@ func NewService(
 	}
 }
 
-func (s *Service) Retrieve(
-	ctx context.Context,
-	query models.RetrievalQuery,
-) ([]models.RetrievedChunk, error) {
+func (s *Service) Retrieve(ctx context.Context, query models.RetrievalQuery) ([]models.RetrievedChunk, error) {
 	if query.TenantID == uuid.Nil {
 		return nil, fmt.Errorf("tenant ID is required")
 	}
@@ -64,42 +61,23 @@ func (s *Service) Retrieve(
 		limit = consts.DefaultRetrievalLimit
 	}
 
-	vectorResults, err := s.vectorSearcher.Search(
-		ctx,
-		query.TenantID,
-		query.UserID,
-		query.QueryEmbedding,
-		limit,
-	)
+	vectorResults, err := s.vectorSearcher.Search(ctx, query.TenantID, query.UserID, query.QueryEmbedding, limit)
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)
 	}
 
-	keywordResults, err := s.keywordSearcher.Search(
-		ctx,
-		query.TenantID,
-		query.UserID,
-		query.Query,
-		limit,
-	)
+	keywordResults, err := s.keywordSearcher.Search(ctx, query.TenantID, query.UserID, query.Query, limit)
 	if err != nil {
 		return nil, fmt.Errorf("keyword search: %w", err)
 	}
 
-	fusedResults := s.fusion.Fuse(
-		vectorResults,
-		keywordResults,
-	)
+	fusedResults := s.fusion.Fuse(vectorResults, keywordResults)
 
 	if len(fusedResults) == 0 {
 		return []models.RetrievedChunk{}, nil
 	}
 
-	rerankedResults, err := s.reranker.Rerank(
-		ctx,
-		query.Query,
-		fusedResults,
-	)
+	rerankedResults, err := s.reranker.Rerank(ctx, query.Query, fusedResults)
 	if err != nil {
 		return nil, fmt.Errorf("rerank results: %w", err)
 	}
