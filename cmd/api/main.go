@@ -40,8 +40,12 @@ func main() {
 		logger.Fatal("db init failed", zap.Error(err))
 	}
 	defer db.Close()
+	migrationDSN := cfg.Database.DSN
+	if migrationDSN == "" {
+		migrationDSN = cfg.Database.URL
+	}
 
-	if err := storage.RunMigrations(db, cfg.Database.MigrationPath, logger); err != nil {
+	if err = storage.RunMigrations(migrationDSN, cfg.Database.MigrationPath, logger); err != nil {
 		logger.Fatal("failed to run migrations", zap.Error(err))
 	}
 

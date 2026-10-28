@@ -17,7 +17,7 @@ import (
 	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/internal/enums"
 	"github.com/mtariq99/retrievion/internal/errs"
-	"github.com/mtariq99/retrievion/internal/storage"
+	"github.com/mtariq99/retrievion/internal/jwtclaims"
 	"github.com/mtariq99/retrievion/models"
 	"github.com/mtariq99/retrievion/utils"
 )
@@ -45,7 +45,7 @@ type tokenIssuer interface {
 	GenerateTokenPair(ctx context.Context, user *models.User, tenantID uuid.UUID, clientIP, userAgent string) (*models.TokenPair, error)
 }
 
-type challengeStore interface {
+type ChallengeStore interface {
 	SaveLoginChallenge(ctx context.Context, key string, value any, ttl time.Duration) error
 	ConsumeLoginChallenge(ctx context.Context, key string) ([]byte, error)
 }
@@ -58,14 +58,14 @@ type Service struct {
 	users      userReader
 	userWriter userWriter
 	membership membershipRepo
-	challenges challengeStore
+	challenges ChallengeStore
 	tokens     tokenIssuer
 
 	jwtSecret []byte
 	jwtTTL    time.Duration
 }
 
-func NewService(repo *Repository, cfg *models.Config, opaqueTokens *OpaqueTokenService, redis *storage.RedisClient) *Service {
+func NewService(repo *Repository, cfg *models.Config, opaqueTokens *OpaqueTokenService, redis ChallengeStore) *Service {
 	return &Service{
 		users:      repo,
 		userWriter: repo,
@@ -163,7 +163,7 @@ func (s *Service) SelectTenant(ctx context.Context, req models.SelectTenantReque
 	// Atomic single-use consume: replays and concurrent requests fail here.
 	raw, err := s.challenges.ConsumeLoginChallenge(ctx, utils.ChallengeKey(req.SelectionToken))
 	if err != nil {
-		if errors.Is(err, storage.ErrChallengeNotFound) {
+		if errors.Is(err, errs.ErrChallengeNotFound) {
 			return nil, errs.ErrInvalidSelectionToken
 		}
 		return nil, err
@@ -235,8 +235,8 @@ func (s *Service) startTenantSelection(ctx context.Context, user *models.User, c
 	}, nil
 }
 
-func (s *Service) ParseToken(tokenString string) (*models.UserClaims, error) {
-	claims := &models.UserClaims{}
+func (s *Service) ParseToken(tokenString string) (*jwtclaims.UserClaims, error) {
+	claims := &jwtclaims.UserClaims{}
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errs.ErrInvalidToken

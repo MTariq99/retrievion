@@ -18,7 +18,6 @@ import (
 	"github.com/mtariq99/retrievion/internal/document"
 	"github.com/mtariq99/retrievion/internal/embedding"
 	"github.com/mtariq99/retrievion/internal/llm"
-	"github.com/mtariq99/retrievion/internal/notifications"
 	"github.com/mtariq99/retrievion/internal/prompt"
 	"github.com/mtariq99/retrievion/internal/retrieval"
 
@@ -36,8 +35,6 @@ func InitializeAPI(
 ) (*httpHandler.Handler, func(), error) {
 	wire.Build(
 		config.Load,
-		notifications.NewEmailService,
-
 		// Infrastructure
 		storage.NewRedis,
 		objectstorage.NewB2Storage,
@@ -47,13 +44,28 @@ func InitializeAPI(
 			new(tenants.InvitationPublisher),
 			new(*storage.RabbitMQQueue),
 		),
-
+		wire.Bind(
+			new(auth.OpaqueTokenStore),
+			new(*storage.RedisClient),
+		),
+		wire.Bind(
+			new(auth.ChallengeStore),
+			new(*storage.RedisClient),
+		),
+		wire.Bind(
+			new(auth.TenantMembershipReader),
+			new(*auth.Repository),
+		),
 		tokenizer.NewCounter,
 
 		// Authentication
 		auth.NewTokenConfig,
 		auth.NewOpaqueTokenService,
 		auth.NewRepository,
+		wire.Bind(
+			new(document.MembershipReader),
+			new(*auth.Repository),
+		),
 		auth.NewClientServiceRepository,
 		auth.NewClientService,
 		auth.NewService,
@@ -123,6 +135,10 @@ func InitializeAPI(
 		tenants.NewTanantRepository,
 		tenants.NewTenantService,
 		tenants.NewTenantHandler,
+		wire.Bind(
+			new(tenants.UserReader),
+			new(*auth.Repository),
+		),
 
 		// Middleware and HTTP handler
 		middleware.NewPhantomTokenMiddleware,

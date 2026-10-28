@@ -18,7 +18,6 @@ import (
 	"github.com/mtariq99/retrievion/internal/http"
 	"github.com/mtariq99/retrievion/internal/llm"
 	"github.com/mtariq99/retrievion/internal/middleware"
-	"github.com/mtariq99/retrievion/internal/notifications"
 	"github.com/mtariq99/retrievion/internal/prompt"
 	"github.com/mtariq99/retrievion/internal/retrieval"
 	"github.com/mtariq99/retrievion/internal/storage"
@@ -44,12 +43,12 @@ func InitializeAPI(db *sql.DB, logger *zap.Logger) (*http.Handler, func(), error
 		return nil, nil, err
 	}
 	tokenConfig := auth.NewTokenConfig()
-	opaqueTokenService := auth.NewOpaqueTokenService(redisClient, tokenConfig)
+	repository := auth.NewRepository(db)
+	opaqueTokenService := auth.NewOpaqueTokenService(redisClient, tokenConfig, repository)
 	phantomTokenMiddleware, err := middleware.NewPhantomTokenMiddleware(opaqueTokenService, modelsConfig, logger)
 	if err != nil {
 		return nil, nil, err
 	}
-	repository := auth.NewRepository(db)
 	service := auth.NewService(repository, modelsConfig, opaqueTokenService, redisClient)
 	serviceClientRepository := auth.NewClientServiceRepository(db)
 	clientService := auth.NewClientService(serviceClientRepository, opaqueTokenService)
@@ -94,8 +93,7 @@ func InitializeAPI(db *sql.DB, logger *zap.Logger) (*http.Handler, func(), error
 	chatService := chat.NewService(chatRepository, conversationService, retrievalService, builder, citationService, embeddingService, llmService, logger, modelsConfig, counter)
 	chatHandler := chat.NewHandler(modelsConfig, chatService, conversationService)
 	tenantRepository := tenants.NewTanantRepository(db)
-	emailService := notifications.NewEmailService(modelsConfig)
-	tenantService := tenants.NewTenantService(modelsConfig, repository, tenantRepository, emailService, rabbitMQQueue)
+	tenantService := tenants.NewTenantService(modelsConfig, repository, tenantRepository, rabbitMQQueue)
 	tenantHandler := tenants.NewTenantHandler(tenantService, modelsConfig)
 	httpHandler := http.NewHandler(logger, phantomTokenMiddleware, handler, documentHandler, chatHandler, tenantHandler)
 	return httpHandler, func() {

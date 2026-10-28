@@ -56,6 +56,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	}
 	api := r.Group("/api/v1")
 	api.Use(h.phantom.ExchangeOpaqueForJWT())
+	api.Use(middleware.RequireUserToken())
 
 	documents := api.Group("/documents")
 	{

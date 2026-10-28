@@ -344,3 +344,155 @@ func (r *Repository) DeleteDocument(ctx context.Context, tenantID, documentID uu
 
 	return nil
 }
+
+func (r *Repository) CreateOutboxEvent(ctx context.Context, eventID uuid.UUID, eventType string, aggregateID uuid.UUID, payload []byte) error {
+	const query = `
+        INSERT INTO ingestion_outbox (
+            id, event_type, aggregate_id, payload
+        )
+        VALUES ($1, $2, $3, $4::jsonb)
+    `
+
+	if _, err := r.q.ExecContext(
+		ctx,
+		query,
+		eventID,
+		eventType,
+		aggregateID,
+		string(payload),
+	); err != nil {
+		return fmt.Errorf("create outbox event: %w", err)
+	}
+
+	return nil
+}
+
+type OutboxEvent struct {
+	ID          uuid.UUID
+	EventType   string
+	AggregateID uuid.UUID
+	Payload     []byte
+	Attempts    int
+	LockedUntil time.Time
+}
+
+func (r *Repository) ClaimOutboxEvents(ctx context.Context, limit int, lease time.Duration) ([]OutboxEvent, error) {
+	const query = `
+		WITH candidates AS (
+			SELECT id
+			FROM ingestion_outbox
+			WHERE published_at IS NULL
+			  AND dead_letter_at IS NULL
+			  AND next_attempt_at <= now()
+			  AND (locked_until IS NULL OR locked_until <= now())
+			ORDER BY created_at
+			FOR UPDATE SKIP LOCKED
+			LIMIT $1
+		)
+		UPDATE ingestion_outbox AS o
+		SET locked_until = now() + $2::interval,
+		    attempts = o.attempts + 1
+		FROM candidates AS c
+		WHERE o.id = c.id
+		RETURNING o.id, o.event_type, o.aggregate_id,
+		          o.payload, o.attempts, o.locked_until
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, limit, lease.String())
+	if err != nil {
+		return nil, fmt.Errorf("claim outbox events: %w", err)
+	}
+	defer rows.Close()
+
+	var events []OutboxEvent
+	for rows.Next() {
+		var event OutboxEvent
+		if err := rows.Scan(
+			&event.ID,
+			&event.EventType,
+			&event.AggregateID,
+			&event.Payload,
+			&event.Attempts,
+			&event.LockedUntil,
+		); err != nil {
+			return nil, fmt.Errorf("scan outbox event: %w", err)
+		}
+		events = append(events, event)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate outbox events: %w", err)
+	}
+
+	return events, nil
+}
+
+func (r *Repository) MarkOutboxEventPublished(ctx context.Context, event OutboxEvent) error {
+	const query = `
+		UPDATE ingestion_outbox
+		SET published_at = now(),
+		    locked_until = NULL,
+		    last_error = NULL
+		WHERE id = $1
+		  AND locked_until = $2
+		  AND published_at IS NULL
+	`
+
+	result, err := r.db.ExecContext(ctx, query, event.ID, event.LockedUntil)
+	if err != nil {
+		return fmt.Errorf("mark outbox event published: %w", err)
+	}
+
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check published outbox event: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("outbox event %s lease expired or was replaced", event.ID)
+	}
+
+	return nil
+}
+
+func (r *Repository) MarkOutboxEventFailed(ctx context.Context, event OutboxEvent, publishErr error, retryDelay time.Duration, maxAttempts int) error {
+	const query = `
+		UPDATE ingestion_outbox
+		SET last_error = $3,
+		    next_attempt_at = CASE
+		        WHEN attempts >= $5 THEN next_attempt_at
+		        ELSE now() + $4::interval
+		    END,
+		    dead_letter_at = CASE
+		        WHEN attempts >= $5 THEN now()
+		        ELSE NULL
+		    END,
+		    locked_until = NULL
+		WHERE id = $1
+		  AND locked_until = $2
+		  AND published_at IS NULL
+		  AND dead_letter_at IS NULL
+	`
+
+	result, err := r.db.ExecContext(
+		ctx,
+		query,
+		event.ID,
+		event.LockedUntil,
+		publishErr.Error(),
+		retryDelay.String(),
+		maxAttempts,
+	)
+	if err != nil {
+		return fmt.Errorf("record outbox publish failure: %w", err)
+	}
+
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check failed outbox event: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("outbox event %s lease expired or was replaced", event.ID)
+	}
+
+	return nil
+}

@@ -10,6 +10,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/mtariq99/retrievion/internal/config"
+	"github.com/mtariq99/retrievion/internal/document"
+
 	"github.com/mtariq99/retrievion/internal/embedding"
 	"github.com/mtariq99/retrievion/internal/ingestion"
 	"github.com/mtariq99/retrievion/internal/notifications"
@@ -30,6 +32,9 @@ func InitializeWorker(db *sql.DB, logger *zap.Logger) (*Workers, func(), error) 
 		storage.ProvideQueue,
 		tokenizer.NewCounter,
 
+		document.NewRepository,
+		document.NewOutboxPublisher,
+
 		// embedding
 		embedding.NewGeminiProvider,
 		wire.Bind(new(embedding.Provider), new(*embedding.GeminiProvider)),
@@ -48,6 +53,7 @@ func InitializeWorker(db *sql.DB, logger *zap.Logger) (*Workers, func(), error) 
 
 		ingestion.NewPipeline,
 		ingestion.NewWorker,
+		ingestion.NewRecoveryWorker,
 	)
 
 	return nil, nil, nil

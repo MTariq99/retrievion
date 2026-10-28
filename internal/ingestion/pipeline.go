@@ -32,25 +32,27 @@ func NewPipeline(repo *Repository, storage objectstorage.Storage, parser Parser,
 }
 
 func (p *Pipeline) Process(ctx context.Context, job models.Job) error {
-	if err := p.repo.MarkJobProcessing(ctx, job.JobID); err != nil {
+	attempt, err := p.repo.MarkJobProcessing(ctx, job.JobID)
+	if err != nil {
 		return err
 	}
+	job.Attempt = attempt
 
 	version, err := p.repo.GetVersionForIngestion(ctx, job.DocumentVersionID)
 	if err != nil {
-		return p.fail(ctx, job.JobID, fmt.Errorf("load version: %w", err))
+		return p.fail(ctx, job.JobID, job.Attempt, fmt.Errorf("load version: %w", err))
 	}
 	tenantID := version.TenantID
 
 	obj, err := p.storage.Download(ctx, version.StorageKey)
 	if err != nil {
-		return p.fail(ctx, job.JobID, fmt.Errorf("download object: %w", err))
+		return p.fail(ctx, job.JobID, job.Attempt, fmt.Errorf("download object: %w", err))
 	}
 	defer obj.Close()
 
 	parsed, err := p.parser.Parse(ctx, obj, version.MimeType)
 	if err != nil {
-		return p.fail(ctx, job.JobID, fmt.Errorf("parse document: %w", err))
+		return p.fail(ctx, job.JobID, job.Attempt, fmt.Errorf("parse document: %w", err))
 	}
 	for _, w := range parsed.Warnings {
 		p.logger.Warn("document parsed with warnings", zap.String("job_id", job.JobID.String()), zap.String("warning", w))
@@ -58,7 +60,7 @@ func (p *Pipeline) Process(ctx context.Context, job models.Job) error {
 
 	chunks, err := p.chunker.Chunk(ctx, parsed, job.DocumentVersionID)
 	if err != nil {
-		return p.fail(ctx, job.JobID, fmt.Errorf("chunk document: %w", err))
+		return p.fail(ctx, job.JobID, job.Attempt, fmt.Errorf("chunk document: %w", err))
 	}
 
 	var texts []string
@@ -75,10 +77,10 @@ func (p *Pipeline) Process(ctx context.Context, job models.Job) error {
 	if len(texts) > 0 {
 		vectors, err := p.embedder.Embed(ctx, texts)
 		if err != nil {
-			return p.fail(ctx, job.JobID, fmt.Errorf("generate embeddings: %w", err))
+			return p.fail(ctx, job.JobID, job.Attempt, fmt.Errorf("generate embeddings: %w", err))
 		}
 		if len(vectors) != len(texts) {
-			return p.fail(ctx, job.JobID, fmt.Errorf("embedding count mismatch: got %d, want %d", len(vectors), len(texts)))
+			return p.fail(ctx, job.JobID, job.Attempt, fmt.Errorf("embedding count mismatch: got %d, want %d", len(vectors), len(texts)))
 		}
 		for i, id := range textChunkIDs {
 			embeddings[id] = vectors[i]
@@ -86,22 +88,22 @@ func (p *Pipeline) Process(ctx context.Context, job models.Job) error {
 	}
 
 	if err := p.repo.StoreChunks(ctx, tenantID, version.DocumentID, chunks, embeddings); err != nil {
-		return p.fail(ctx, job.JobID, fmt.Errorf("store chunks: %w", err))
+		return p.fail(ctx, job.JobID, job.Attempt, fmt.Errorf("store chunks: %w", err))
 	}
 
-	if err := p.repo.ActivateVersion(ctx, job.DocumentID, job.DocumentVersionID); err != nil {
-		return p.fail(ctx, job.JobID, fmt.Errorf("activate version: %w", err))
+	if err := p.repo.ActivateVersion(ctx, job.JobID, job.DocumentID, job.DocumentVersionID, job.Attempt); err != nil {
+		return p.fail(ctx, job.JobID, job.Attempt, fmt.Errorf("activate version: %w", err))
 	}
 
-	if err := p.repo.MarkJobCompleted(ctx, job.JobID); err != nil {
+	if err := p.repo.MarkJobCompleted(ctx, job.JobID, job.Attempt); err != nil {
 		return fmt.Errorf("mark job completed: %w", err)
 	}
 
 	return nil
 }
 
-func (p *Pipeline) fail(ctx context.Context, jobID uuid.UUID, cause error) error {
-	if markErr := p.repo.MarkJobFailed(ctx, jobID, cause); markErr != nil {
+func (p *Pipeline) fail(ctx context.Context, jobID uuid.UUID, attempt int, cause error) error {
+	if markErr := p.repo.MarkJobFailed(ctx, jobID, attempt, cause); markErr != nil {
 		return fmt.Errorf("%w (also failed to record failure: %v)", cause, markErr)
 	}
 	return cause

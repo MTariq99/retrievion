@@ -8,7 +8,6 @@ import (
 
 	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/internal/storage"
-	"github.com/mtariq99/retrievion/models"
 )
 
 type Worker struct {
@@ -22,12 +21,12 @@ func NewWorker(queue storage.Queue, pipeline *Pipeline, logger *zap.Logger) *Wor
 }
 
 func (w *Worker) Run(ctx context.Context) error {
-	return w.queue.Consume(ctx, consts.IngestionQueueName, func(msg models.QueueMessage) error {
+	return w.queue.Consume(ctx, consts.IngestionQueueName, func(msg []byte) error {
 		return w.handle(ctx, msg)
 	})
 }
 
-func (w *Worker) handle(ctx context.Context, msg models.QueueMessage) (err error) {
+func (w *Worker) handle(ctx context.Context, msg []byte) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			w.logger.Error("ingestion worker panic", zap.Any("recover", r))
@@ -35,7 +34,7 @@ func (w *Worker) handle(ctx context.Context, msg models.QueueMessage) (err error
 		}
 	}()
 
-	job, parseErr := ParseJob(msg.Body)
+	job, parseErr := ParseJob(msg)
 	if parseErr != nil {
 		w.logger.Error("invalid ingestion job payload", zap.Error(parseErr))
 		return parseErr

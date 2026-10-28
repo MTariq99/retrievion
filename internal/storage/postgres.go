@@ -61,12 +61,29 @@ func BuildLogger(env string) (*zap.Logger, error) {
 	return zap.NewDevelopment()
 }
 
-func RunMigrations(db *sql.DB, migrationPath string, logger *zap.Logger) error {
+func RunMigrations(dsn, migrationPath string, logger *zap.Logger) error {
 	logger.Info("running database migrations")
 
-	driver, err := mpg.WithInstance(db, &mpg.Config{})
+	migrationDB, err := sql.Open(consts.DriverName, dsn)
 	if err != nil {
-		return fmt.Errorf("unable to create migration driver: %w", err)
+		return fmt.Errorf("open migration database: %w", err)
+	}
+
+	// This pool belongs only to the migration runner.
+	// Never pass the API's shared pool to a migration instance
+	// that will be closed.
+	defer migrationDB.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := migrationDB.PingContext(ctx); err != nil {
+		return fmt.Errorf("ping migration database: %w", err)
+	}
+
+	driver, err := mpg.WithInstance(migrationDB, &mpg.Config{})
+	if err != nil {
+		return fmt.Errorf("create migration driver: %w", err)
 	}
 
 	m, err := migrate.NewWithDatabaseInstance(
@@ -75,14 +92,26 @@ func RunMigrations(db *sql.DB, migrationPath string, logger *zap.Logger) error {
 		driver,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to create migration instance: %w", err)
+		_ = driver.Close()
+		return fmt.Errorf("create migration instance: %w", err)
 	}
 
-	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		return fmt.Errorf("migration failed: %w", err)
+	upErr := m.Up()
+	sourceCloseErr, databaseCloseErr := m.Close()
+
+	if upErr != nil && !errors.Is(upErr, migrate.ErrNoChange) {
+		return fmt.Errorf("migration failed: %w", upErr)
 	}
 
-	if errors.Is(err, migrate.ErrNoChange) {
+	if sourceCloseErr != nil {
+		return fmt.Errorf("close migration source: %w", sourceCloseErr)
+	}
+
+	if databaseCloseErr != nil {
+		return fmt.Errorf("close migration database driver: %w", databaseCloseErr)
+	}
+
+	if errors.Is(upErr, migrate.ErrNoChange) {
 		logger.Info("migrations: no changes")
 	} else {
 		logger.Info("migrations: completed successfully")

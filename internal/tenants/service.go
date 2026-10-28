@@ -11,15 +11,13 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mtariq99/retrievion/internal/auth"
 	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/internal/errs"
-	"github.com/mtariq99/retrievion/internal/notifications"
 	"github.com/mtariq99/retrievion/models"
 	"github.com/mtariq99/retrievion/utils"
 )
 
-type userReader interface {
+type UserReader interface {
 	FindUserByID(ctx context.Context, id uuid.UUID) (*models.User, error)
 	FindUserByEmail(ctx context.Context, email string) (*models.User, error)
 	GetMembership(ctx context.Context, tenantID, userID uuid.UUID) (*models.TenantMember, error)
@@ -31,18 +29,16 @@ type TenantMutation interface {
 	CreateTenantInvitations(ctx context.Context, tenantID, invitedBy uuid.UUID, invites []models.NewInvitation, expiresAt time.Time) error
 }
 type TenantService struct {
-	userReader    userReader
+	userReader    UserReader
 	TenantMutator TenantMutation
-	emailService  *notifications.EmailService
 	Cfg           *models.Config
 	publisher     InvitationPublisher
 }
 
-func NewTenantService(cfg *models.Config, userReader *auth.Repository, repo *TenantRepository, es *notifications.EmailService, publisher InvitationPublisher) *TenantService {
+func NewTenantService(cfg *models.Config, userReader UserReader, repo *TenantRepository, publisher InvitationPublisher) *TenantService {
 	return &TenantService{
 		userReader:    userReader,
 		TenantMutator: repo,
-		emailService:  es,
 		Cfg:           cfg,
 		publisher:     publisher,
 	}

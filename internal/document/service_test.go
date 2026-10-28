@@ -144,15 +144,7 @@ func (f *queueFake) Publish(context.Context, string, []byte) error {
 	return nil
 }
 
-func (f *queueFake) Consume(context.Context, string, func(models.QueueMessage) error) error {
-	return nil
-}
-
-func (f *queueFake) Ack(context.Context, models.QueueMessage) error {
-	return nil
-}
-
-func (f *queueFake) Nack(context.Context, models.QueueMessage) error {
+func (f *queueFake) Consume(context.Context, string, func([]byte) error) error {
 	return nil
 }
 
@@ -505,4 +497,14 @@ func TestGetDocumentAllowsAuthorizedTenantMember(t *testing.T) {
 	if deps.reader.findDocumentCalls != 1 {
 		t.Fatalf("document query calls = %d, want 1", deps.reader.findDocumentCalls)
 	}
+}
+
+func (f *documentMutatorFake) CreateOutboxEvent(
+	ctx context.Context,
+	eventID uuid.UUID,
+	eventType string,
+	aggregateID uuid.UUID,
+	payload []byte,
+) error {
+	return nil
 }

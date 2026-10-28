@@ -5,20 +5,29 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/internal/enums"
-	"github.com/mtariq99/retrievion/internal/storage"
 	"github.com/mtariq99/retrievion/models"
 )
 
+type OpaqueTokenStore interface {
+	SaveToken(ctx context.Context, token *models.OpaqueToken) error
+	GetToken(ctx context.Context, tokenID string) (*models.OpaqueToken, error)
+	RevokeToken(ctx context.Context, tokenID string) error
+	RevokeAllUserTokens(ctx context.Context, userID uuid.UUID) error
+}
+type TenantMembershipReader interface {
+	GetMembership(ctx context.Context, tenantID uuid.UUID, userID uuid.UUID) (*models.TenantMember, error)
+}
+
 type OpaqueTokenService struct {
-	redis  *storage.RedisClient
-	config *TokenConfig
+	redis      OpaqueTokenStore
+	config     *TokenConfig
+	membership TenantMembershipReader
 }
 
 type TokenConfig struct {
@@ -35,13 +44,14 @@ func NewTokenConfig() *TokenConfig {
 	}
 }
 
-func NewOpaqueTokenService(redis *storage.RedisClient, config *TokenConfig) *OpaqueTokenService {
+func NewOpaqueTokenService(redis OpaqueTokenStore, config *TokenConfig, membership TenantMembershipReader) *OpaqueTokenService {
 	if config == nil {
 		config = NewTokenConfig()
 	}
 	return &OpaqueTokenService{
-		redis:  redis,
-		config: config,
+		redis:      redis,
+		config:     config,
+		membership: membership,
 	}
 }
 
@@ -124,6 +134,8 @@ func (s *OpaqueTokenService) IntrospectToken(ctx context.Context, tokenID string
 		Scopes:    token.Scopes,
 		TenantID:  token.TenantID,
 		UserRole:  token.UserRole,
+		IsService: token.IsService,
+		ClientID:  token.ClientID,
 	}, nil
 }
 
@@ -139,6 +151,12 @@ func (s *OpaqueTokenService) RefreshAccessToken(ctx context.Context, refreshToke
 	}
 	if refreshToken.TokenType != "refresh" {
 		return nil, fmt.Errorf("token is not a refresh token")
+	}
+	if refreshToken.IsService {
+		return nil, fmt.Errorf("service tokens cannot be refreshed through user refresh flow")
+	}
+	if err = s.ValidateUserTenantMembership(ctx, refreshToken.TenantID, refreshToken.UserID); err != nil {
+		return nil, fmt.Errorf("refresh token tenant membership is invalid: %w", err)
 	}
 
 	user := &models.User{
@@ -173,8 +191,6 @@ func getUserRole(user *models.User) string {
 	return string(user.Role)
 }
 
-var _ = strconv.FormatInt
-
 func (s *OpaqueTokenService) GenerateServiceToken(ctx context.Context, clientID string, tenantID uuid.UUID) (string, time.Time, error) {
 	randomBytes := make([]byte, 32)
 	if _, err := rand.Read(randomBytes); err != nil {
@@ -201,4 +217,21 @@ func (s *OpaqueTokenService) GenerateServiceToken(ctx context.Context, clientID 
 		return "", time.Time{}, fmt.Errorf("failed to save service token: %w", err)
 	}
 	return fullToken, expiresAt, nil
+}
+
+func (s *OpaqueTokenService) ValidateUserTenantMembership(ctx context.Context, tenantID, userID uuid.UUID) error {
+	if tenantID == uuid.Nil || userID == uuid.Nil {
+		return fmt.Errorf("tenant and user IDs are required")
+	}
+	if s.membership == nil {
+		return fmt.Errorf("tenant membership reader is not configured")
+	}
+	membership, err := s.membership.GetMembership(ctx, tenantID, userID)
+	if err != nil {
+		return fmt.Errorf("get tenant membership: %w", err)
+	}
+	if membership == nil || membership.TenantID != tenantID || membership.UserID != userID {
+		return fmt.Errorf("tenant membership does not match token")
+	}
+	return nil
 }

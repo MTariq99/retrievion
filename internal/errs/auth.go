@@ -16,4 +16,5 @@ var (
 	ErrNoTenantMembership       = errors.New("account has no workspace membership")
 	ErrInvalidSelectionToken    = errors.New("invalid or expired selection token")
 	ErrTenantAccessDenied       = errors.New("no access to the selected workspace")
+	ErrChallengeNotFound        = errors.New("challenge not found")
 )

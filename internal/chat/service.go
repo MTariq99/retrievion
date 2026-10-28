@@ -20,8 +20,8 @@ import (
 )
 
 type chatMutator interface {
-	CreateMessage(ctx context.Context, conversationID uuid.UUID, role consts.MessageRole, content string) (*models.Message, error)
-	CreateMessageSources(ctx context.Context, messageID uuid.UUID, sources []models.MessageSource) error
+	CreateMessage(ctx context.Context, userID, tenantID, conversationID uuid.UUID, role consts.MessageRole, content string) (*models.Message, error)
+	CreateMessageSources(ctx context.Context, userID, tenantID, messageID uuid.UUID, sources []models.MessageSource) error
 }
 
 type chatReader interface {
@@ -84,7 +84,7 @@ func (s *Service) Chat(ctx context.Context, userID, tenantID uuid.UUID, req *mod
 		return nil, fmt.Errorf("get conversation: %w", err)
 	}
 
-	_, err = s.chatMutator.CreateMessage(ctx, req.ConversationID, consts.MessageRoleUser, req.Message)
+	_, err = s.chatMutator.CreateMessage(ctx, userID, tenantID, req.ConversationID, consts.MessageRoleUser, req.Message)
 	if err != nil {
 		return nil, fmt.Errorf("save user message: %w", err)
 	}
@@ -133,7 +133,7 @@ func (s *Service) Chat(ctx context.Context, userID, tenantID uuid.UUID, req *mod
 		return nil, err
 	}
 
-	assistantMessage, err := s.chatMutator.CreateMessage(ctx, req.ConversationID, consts.MessageRoleAssistant, result.Text)
+	assistantMessage, err := s.chatMutator.CreateMessage(ctx, userID, tenantID, req.ConversationID, consts.MessageRoleAssistant, result.Text)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +142,7 @@ func (s *Service) Chat(ctx context.Context, userID, tenantID uuid.UUID, req *mod
 		messageSources[i].MessageID = assistantMessage.ID
 	}
 
-	if err := s.chatMutator.CreateMessageSources(ctx, assistantMessage.ID, messageSources); err != nil {
+	if err := s.chatMutator.CreateMessageSources(ctx, userID, tenantID, assistantMessage.ID, messageSources); err != nil {
 		return nil, err
 	}
 
@@ -180,7 +180,7 @@ func (s *Service) StreamChat(ctx context.Context, userID, tenantID uuid.UUID, re
 		return nil, fmt.Errorf("get conversation: %w", err)
 	}
 
-	_, err = s.chatMutator.CreateMessage(ctx, req.ConversationID, consts.MessageRoleUser, req.Message)
+	_, err = s.chatMutator.CreateMessage(ctx, userID, tenantID, req.ConversationID, consts.MessageRoleUser, req.Message)
 	if err != nil {
 		return nil, fmt.Errorf("save user message: %w", err)
 	}
@@ -241,7 +241,7 @@ func (s *Service) StreamChat(ctx context.Context, userID, tenantID uuid.UUID, re
 		return nil, fmt.Errorf("resolve citations: %w", err)
 	}
 
-	assistantMessage, err := s.chatMutator.CreateMessage(ctx, req.ConversationID, consts.MessageRoleAssistant, finalAnswer)
+	assistantMessage, err := s.chatMutator.CreateMessage(ctx, userID, tenantID, req.ConversationID, consts.MessageRoleAssistant, finalAnswer)
 	if err != nil {
 		return nil, fmt.Errorf("save assistant message: %w", err)
 	}
@@ -250,7 +250,7 @@ func (s *Service) StreamChat(ctx context.Context, userID, tenantID uuid.UUID, re
 		messageSources[i].MessageID = assistantMessage.ID
 	}
 
-	if err := s.chatMutator.CreateMessageSources(ctx, assistantMessage.ID, messageSources); err != nil {
+	if err := s.chatMutator.CreateMessageSources(ctx, userID, tenantID, assistantMessage.ID, messageSources); err != nil {
 		return nil, fmt.Errorf("save message sources: %w", err)
 	}
 

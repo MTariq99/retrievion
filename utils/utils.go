@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/internal/enums"
-	"github.com/mtariq99/retrievion/models"
+	"github.com/mtariq99/retrievion/internal/jwtclaims"
 )
 
 func GenerateToken() (string, error) {
@@ -23,7 +23,7 @@ func GenerateToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
-func GetUserClaims(c *gin.Context) (*models.UserClaims, bool) {
+func GetUserClaims(c *gin.Context) (*jwtclaims.UserClaims, bool) {
 	userIdVal, exists := c.Get(consts.UserID)
 	if !exists {
 		return nil, false
@@ -85,7 +85,7 @@ func GetUserClaims(c *gin.Context) (*models.UserClaims, bool) {
 		return nil, false
 	}
 
-	claims := &models.UserClaims{
+	claims := &jwtclaims.UserClaims{
 		UserId:            userId,
 		UserEmail:         userEmail,
 		UserOpaqueTokenId: opaqueTokenId,

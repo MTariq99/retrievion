@@ -9,6 +9,7 @@ package main
 import (
 	"database/sql"
 	"github.com/mtariq99/retrievion/internal/config"
+	"github.com/mtariq99/retrievion/internal/document"
 	"github.com/mtariq99/retrievion/internal/embedding"
 	"github.com/mtariq99/retrievion/internal/ingestion"
 	"github.com/mtariq99/retrievion/internal/notifications"
@@ -52,9 +53,14 @@ func InitializeWorker(db *sql.DB, logger *zap.Logger) (*Workers, func(), error) 
 	worker := ingestion.NewWorker(queue, pipeline, logger)
 	emailService := notifications.NewEmailService(modelsConfig)
 	invitationWorker := notifications.NewInvitationWorker(rabbitMQQueue, emailService, modelsConfig, logger)
+	documentRepository := document.NewRepository(db)
+	outboxPublisher := document.NewOutboxPublisher(documentRepository, queue, logger)
+	recoveryWorker := ingestion.NewRecoveryWorker(repository, logger)
 	workers := &Workers{
-		Ingestion:   worker,
-		Invitations: invitationWorker,
+		Ingestion:       worker,
+		Invitations:     invitationWorker,
+		OutboxPublisher: outboxPublisher,
+		Recovery:        recoveryWorker,
 	}
 	return workers, func() {
 	}, nil

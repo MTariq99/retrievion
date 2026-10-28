@@ -67,15 +67,15 @@ func (c *Client) Generate(ctx context.Context, req models.GenerateRequest) (mode
 	}, nil
 }
 
-func (c *Client) doGenerate(ctx context.Context, prompt string, maxTokens int, temperature float64) (*models.GeminiResult, error) {
-	reqBody := models.GeminiRequest{
-		Contents: []models.Content{
-			{Parts: []models.Part{{Text: prompt}}},
+func (c *Client) doGenerate(ctx context.Context, prompt string, maxTokens int, temperature float64) (*geminiResult, error) {
+	reqBody := geminiRequest{
+		Contents: []geminiContent{
+			{Parts: []geminiPart{{Text: prompt}}},
 		},
-		GenerationConfig: models.GenerationConfig{
+		GenerationConfig: geminiGenerationConfig{
 			MaxOutputTokens: maxTokens,
 			Temperature:     temperature,
-			ThinkingConfig:  &models.ThinkingConfig{ThinkingBudget: 0},
+			ThinkingConfig:  &geminiThinkingConfig{ThinkingBudget: 0},
 		},
 	}
 
@@ -128,7 +128,7 @@ func (c *Client) doGenerate(ctx context.Context, prompt string, maxTokens int, t
 		}
 	}
 
-	var gemResp models.GeminiResponse
+	var gemResp geminiResponse
 	if err := json.NewDecoder(resp.Body).Decode(&gemResp); err != nil {
 		return nil, fmt.Errorf("gemini: decode response: %w", err)
 	}
@@ -137,7 +137,7 @@ func (c *Client) doGenerate(ctx context.Context, prompt string, maxTokens int, t
 		return nil, fmt.Errorf("gemini: empty response")
 	}
 
-	return &models.GeminiResult{
+	return &geminiResult{
 		Text:             gemResp.Candidates[0].Content.Parts[0].Text,
 		PromptTokens:     gemResp.UsageMetadata.PromptTokenCount,
 		CompletionTokens: gemResp.UsageMetadata.CandidatesTokenCount,
@@ -146,14 +146,14 @@ func (c *Client) doGenerate(ctx context.Context, prompt string, maxTokens int, t
 }
 
 func (c *Client) Stream(ctx context.Context, req models.GenerateRequest, callback func(models.StreamEvent) error) error {
-	reqBody := models.GeminiRequest{
-		Contents: []models.Content{
-			{Parts: []models.Part{{Text: req.Prompt}}},
+	reqBody := geminiRequest{
+		Contents: []geminiContent{
+			{Parts: []geminiPart{{Text: req.Prompt}}},
 		},
-		GenerationConfig: models.GenerationConfig{
+		GenerationConfig: geminiGenerationConfig{
 			MaxOutputTokens: req.MaxTokens,
 			Temperature:     req.Temperature,
-			ThinkingConfig:  &models.ThinkingConfig{ThinkingBudget: 0},
+			ThinkingConfig:  &geminiThinkingConfig{ThinkingBudget: 0},
 		},
 	}
 
@@ -198,7 +198,7 @@ func (c *Client) Stream(ctx context.Context, req models.GenerateRequest, callbac
 			continue
 		}
 
-		var chunk models.GeminiResponse
+		var chunk geminiResponse
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 			if cbErr := callback(models.StreamEvent{Type: consts.StreamEventError, Err: fmt.Errorf("decode chunk: %w", err), Timestamp: time.Now()}); cbErr != nil {
 				return cbErr
@@ -294,16 +294,16 @@ func (e *ProviderError) Retryable() bool {
 }
 
 func (c *Client) GenerateStructured(ctx context.Context, prompt string, schema map[string]interface{}) (string, error) {
-	reqBody := models.GeminiRequest{
-		Contents: []models.Content{
-			{Parts: []models.Part{{Text: prompt}}},
+	reqBody := geminiRequest{
+		Contents: []geminiContent{
+			{Parts: []geminiPart{{Text: prompt}}},
 		},
-		GenerationConfig: models.GenerationConfig{
+		GenerationConfig: geminiGenerationConfig{
 			MaxOutputTokens:  2048,
 			Temperature:      0.0, // judgment task — consistency over creativity
 			ResponseMimeType: "application/json",
 			ResponseSchema:   schema,
-			ThinkingConfig:   &models.ThinkingConfig{ThinkingBudget: 0},
+			ThinkingConfig:   &geminiThinkingConfig{ThinkingBudget: 0},
 		},
 	}
 
@@ -332,7 +332,7 @@ func (c *Client) GenerateStructured(ctx context.Context, prompt string, schema m
 		return "", providerErrorFromResponse(resp)
 	}
 
-	var gemResp models.GeminiResponse
+	var gemResp geminiResponse
 	if err := json.NewDecoder(resp.Body).Decode(&gemResp); err != nil {
 		return "", fmt.Errorf("gemini: decode response: %w", err)
 	}

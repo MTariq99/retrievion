@@ -12,7 +12,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mtariq99/retrievion/internal/auth"
 	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/internal/errs"
 	"github.com/mtariq99/retrievion/internal/filetype"
@@ -21,9 +20,7 @@ import (
 	"github.com/mtariq99/retrievion/pkg/objectstorage"
 )
 
-type userReader interface {
-	FindUserByID(ctx context.Context, id uuid.UUID) (*models.User, error)
-	FindUserByEmail(ctx context.Context, email string) (*models.User, error)
+type MembershipReader interface {
 	GetMembership(ctx context.Context, tenantID, userID uuid.UUID) (*models.TenantMember, error)
 }
 type documentMutator interface {
@@ -31,6 +28,7 @@ type documentMutator interface {
 	CreateDocumentVersion(ctx context.Context, version *models.DocumentVersion) error
 	CreateIngestionJob(ctx context.Context, job *models.IngestionJob) error
 	DeleteDocument(ctx context.Context, tenantID, documentID uuid.UUID) error
+	CreateOutboxEvent(ctx context.Context, eventID uuid.UUID, eventType string, aggregateID uuid.UUID, payload []byte) error
 }
 
 type documentReader interface {
@@ -46,13 +44,13 @@ type txRunner interface {
 type Service struct {
 	documentMutator documentMutator
 	documentReader  documentReader
-	users           userReader
+	users           MembershipReader
 	tx              txRunner
 	B2              objectstorage.Storage
 	queue           storage.Queue
 }
 
-func NewService(b2 objectstorage.Storage, repo *Repository, cfg *models.Config, usersRepo *auth.Repository, q storage.Queue) *Service {
+func NewService(b2 objectstorage.Storage, repo *Repository, cfg *models.Config, usersRepo MembershipReader, q storage.Queue) *Service {
 	return &Service{
 		documentMutator: repo,
 		documentReader:  repo,
@@ -157,30 +155,42 @@ func (s *Service) UploadDocument(ctx context.Context, userID, tenantID uuid.UUID
 		DocumentVersionID: versionID,
 	}
 
+	body, err := storage.MarshalIngestionJob(jobID.String(), documentID.String(), versionID.String())
+	if err != nil {
+		_ = s.B2.Delete(ctx, objectKey)
+		return nil, fmt.Errorf("marshal ingestion event: %w", err)
+	}
+
+	outboxID := uuid.New()
+
 	err = s.tx.WithTx(ctx, func(tx documentMutator) error {
 		if err := tx.CreateDocument(ctx, document); err != nil {
 			return err
 		}
+
 		if err := tx.CreateDocumentVersion(ctx, version); err != nil {
 			return err
 		}
+
 		if err := tx.CreateIngestionJob(ctx, job); err != nil {
 			return err
 		}
+
+		if err := tx.CreateOutboxEvent(
+			ctx,
+			outboxID,
+			"ingestion.job.created",
+			jobID,
+			body,
+		); err != nil {
+			return err
+		}
+
 		return nil
 	})
 	if err != nil {
 		_ = s.B2.Delete(ctx, objectKey)
 		return nil, fmt.Errorf("create document records: %w", err)
-	}
-
-	body, err := storage.MarshalIngestionJob(jobID.String(), documentID.String(), versionID.String())
-	if err != nil {
-		return nil, fmt.Errorf("marshal ingestion event: %w", err)
-	}
-
-	if err := s.queue.Publish(ctx, consts.IngestionRoutingKey, body); err != nil {
-		return nil, fmt.Errorf("publish ingestion event: %w", err)
 	}
 
 	return &models.UploadResult{

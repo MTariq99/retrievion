@@ -52,7 +52,14 @@ func main() {
 	g.Go(func() error {
 		return workers.Invitations.Run(gctx)
 	})
-
+	g.Go(func() error {
+		logger.Info("outbox publisher starting")
+		return workers.OutboxPublisher.Run(gctx)
+	})
+	g.Go(func() error {
+		logger.Info("ingestion recovery worker starting")
+		return workers.Recovery.Run(gctx)
+	})
 	errCh := make(chan error, 1)
 	go func() { errCh <- g.Wait() }()
 

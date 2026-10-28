@@ -10,7 +10,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/mtariq99/retrievion/internal/errs"
-	"github.com/mtariq99/retrievion/internal/storage"
 	"github.com/mtariq99/retrievion/models"
 )
 
@@ -66,7 +65,7 @@ func (f *fakeChallenges) SaveLoginChallenge(_ context.Context, k string, v any, 
 func (f *fakeChallenges) ConsumeLoginChallenge(_ context.Context, k string) ([]byte, error) {
 	b, ok := f.m[k]
 	if !ok {
-		return nil, storage.ErrChallengeNotFound
+		return nil, errs.ErrChallengeNotFound
 	}
 	delete(f.m, k)
 	return b, nil

@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
 	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/models"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -14,15 +15,14 @@ import (
 
 type Queue interface {
 	Publish(ctx context.Context, routingKey string, body []byte) error
-	Consume(ctx context.Context, queueName string, handler func(models.QueueMessage) error) error
-	Ack(ctx context.Context, msg models.QueueMessage) error
-	Nack(ctx context.Context, msg models.QueueMessage) error
+	Consume(ctx context.Context, queueName string, handler func([]byte) error) error
 }
 
 type RabbitMQQueue struct {
 	conn    *amqp.Connection
 	channel *amqp.Channel
 	pubCh   *amqp.Channel
+	returns chan amqp.Return
 	pubMu   sync.Mutex
 }
 
@@ -48,10 +48,12 @@ func NewRabbitMQQueue(config *models.Config) (*RabbitMQQueue, error) {
 		_ = conn.Close()
 		return nil, fmt.Errorf("enable publisher confirms: %w", err)
 	}
+	returns := pubCh.NotifyReturn(make(chan amqp.Return, 1))
 	q := &RabbitMQQueue{
 		conn:    conn,
 		channel: ch,
 		pubCh:   pubCh,
+		returns: returns,
 	}
 
 	if err := q.declareTopology(); err != nil {
@@ -195,18 +197,60 @@ func (q *RabbitMQQueue) declareInvitationTopology() error {
 }
 
 func (q *RabbitMQQueue) Publish(ctx context.Context, routingKey string, body []byte) error {
-	return q.channel.PublishWithContext(
+	q.pubMu.Lock()
+	defer q.pubMu.Unlock()
+
+	// Remove any notification left by a previous interrupted publish.
+	for {
+		select {
+		case <-q.returns:
+			continue
+		default:
+			goto drained
+		}
+	}
+
+drained:
+	messageID := uuid.NewString()
+
+	conf, err := q.pubCh.PublishWithDeferredConfirmWithContext(
 		ctx,
 		consts.IngestionExchangeName,
 		routingKey,
-		false, // mandatory
-		false, // immediate
+		true, // mandatory
+		false,
 		amqp.Publishing{
 			ContentType:  "application/json",
 			DeliveryMode: amqp.Persistent,
+			MessageId:    messageID,
 			Body:         body,
 		},
 	)
+	if err != nil {
+		return fmt.Errorf("publish ingestion message: %w", err)
+	}
+
+	acked, err := conf.WaitContext(ctx)
+	if err != nil {
+		return fmt.Errorf("wait for ingestion publisher confirm: %w", err)
+	}
+	if !acked {
+		return errors.New("rabbitmq nacked ingestion message")
+	}
+
+	// RabbitMQ sends an unroutable message's return before its
+	// publisher confirmation. Check the notification after confirmation.
+	select {
+	case returned := <-q.returns:
+		if returned.MessageId == messageID {
+			return fmt.Errorf("rabbitmq returned unroutable ingestion message %q (reply code %d: %s)", messageID, returned.ReplyCode, returned.ReplyText)
+		}
+
+		return fmt.Errorf("received unexpected returned message %q while publishing %q", returned.MessageId, messageID)
+	default:
+	}
+
+	return nil
 }
 
 func (q *RabbitMQQueue) PublishInvitation(ctx context.Context, messageID string, body []byte) error {
@@ -335,7 +379,7 @@ func processWithRetry(ctx context.Context, ch *amqp.Channel, opts RetryOptions, 
 	_ = delivery.Ack(false)
 }
 
-func (q *RabbitMQQueue) Consume(ctx context.Context, queueName string, handler func(models.QueueMessage) error) error {
+func (q *RabbitMQQueue) Consume(ctx context.Context, queueName string, handler func([]byte) error) error {
 	deliveries, err := q.channel.Consume(
 		queueName,
 		"",    // consumer tag (auto-generated)
@@ -359,14 +403,18 @@ func (q *RabbitMQQueue) Consume(ctx context.Context, queueName string, handler f
 				return fmt.Errorf("delivery channel closed")
 			}
 
-			msg := models.QueueMessage{Body: d.Body, DeliveryTag: d.DeliveryTag, Delivery: d}
-
-			if err := handler(msg); err != nil {
-				_ = q.Nack(ctx, msg)
+			if err := handler(d.Body); err != nil {
+				if nackErr := d.Nack(false, false); nackErr != nil {
+					return fmt.Errorf(
+						"nack failed message: %w (handler error: %v)",
+						nackErr,
+						err,
+					)
+				}
 				continue
 			}
 
-			if err := q.Ack(ctx, msg); err != nil {
+			if err := d.Ack(false); err != nil {
 				return fmt.Errorf("ack message: %w", err)
 			}
 		}
@@ -374,16 +422,27 @@ func (q *RabbitMQQueue) Consume(ctx context.Context, queueName string, handler f
 }
 
 func (q *RabbitMQQueue) Close() error {
+	var firstErr error
+
 	if q.channel != nil {
-		q.channel.Close()
+		if err := q.channel.Close(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("close consumer channel: %w", err)
+		}
 	}
-	if q.conn != nil {
-		return q.conn.Close()
-	}
+
 	if q.pubCh != nil {
-		q.pubCh.Close()
+		if err := q.pubCh.Close(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("close publisher channel: %w", err)
+		}
 	}
-	return nil
+
+	if q.conn != nil {
+		if err := q.conn.Close(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("close rabbitmq connection: %w", err)
+		}
+	}
+
+	return firstErr
 }
 
 func MarshalIngestionJob(jobID, documentID, versionID string) ([]byte, error) {
@@ -392,12 +451,4 @@ func MarshalIngestionJob(jobID, documentID, versionID string) ([]byte, error) {
 		"document_id": documentID,
 		"version_id":  versionID,
 	})
-}
-
-func (q *RabbitMQQueue) Ack(ctx context.Context, msg models.QueueMessage) error {
-	return msg.Delivery.Ack(false)
-}
-
-func (q *RabbitMQQueue) Nack(ctx context.Context, msg models.QueueMessage) error {
-	return msg.Delivery.Nack(false, false)
 }

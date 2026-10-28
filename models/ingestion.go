@@ -5,7 +5,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mtariq99/retrievion/internal/consts"
-	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type IngestionJob struct {
@@ -31,16 +30,11 @@ type JobMessage struct {
 	DocumentVersionID uuid.UUID `json:"version_id"`
 }
 
-type QueueMessage struct {
-	Body        []byte
-	DeliveryTag uint64
-	Delivery    amqp.Delivery
-}
-
 type Job struct {
 	JobID             uuid.UUID
 	DocumentID        uuid.UUID
 	DocumentVersionID uuid.UUID
+	Attempt           int
 }
 type JobPayload struct {
 	JobID             string `json:"job_id"`
