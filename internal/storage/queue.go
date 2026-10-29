@@ -196,11 +196,10 @@ func (q *RabbitMQQueue) declareInvitationTopology() error {
 	return nil
 }
 
-func (q *RabbitMQQueue) Publish(ctx context.Context, routingKey string, body []byte) error {
+func (q *RabbitMQQueue) publishConfirmed(ctx context.Context, exchange string, routingKey string, message amqp.Publishing) error {
 	q.pubMu.Lock()
 	defer q.pubMu.Unlock()
 
-	// Remove any notification left by a previous interrupted publish.
 	for {
 		select {
 		case <-q.returns:
@@ -211,58 +210,60 @@ func (q *RabbitMQQueue) Publish(ctx context.Context, routingKey string, body []b
 	}
 
 drained:
-	messageID := uuid.NewString()
-
 	conf, err := q.pubCh.PublishWithDeferredConfirmWithContext(
 		ctx,
-		consts.IngestionExchangeName,
+		exchange,
 		routingKey,
-		true, // mandatory
+		true, // mandatory: report unroutable messages
 		false,
-		amqp.Publishing{
-			ContentType:  "application/json",
-			DeliveryMode: amqp.Persistent,
-			MessageId:    messageID,
-			Body:         body,
-		},
+		message,
 	)
 	if err != nil {
-		return fmt.Errorf("publish ingestion message: %w", err)
+		return fmt.Errorf("publish message to %q: %w", routingKey, err)
 	}
 
-	acked, err := conf.WaitContext(ctx)
-	if err != nil {
-		return fmt.Errorf("wait for ingestion publisher confirm: %w", err)
-	}
+	// Once publishing starts, wait for the broker's confirmation even if
+	// ctx is canceled. Returning early could leave a mandatory-return
+	// notification pending and misattribute it to the next serialized publish.
+	acked := conf.Wait()
 	if !acked {
-		return errors.New("rabbitmq nacked ingestion message")
+		return fmt.Errorf("broker did not ack message %q", message.MessageId)
 	}
 
-	// RabbitMQ sends an unroutable message's return before its
-	// publisher confirmation. Check the notification after confirmation.
 	select {
-	case returned := <-q.returns:
-		if returned.MessageId == messageID {
-			return fmt.Errorf("rabbitmq returned unroutable ingestion message %q (reply code %d: %s)", messageID, returned.ReplyCode, returned.ReplyText)
+	case returned, ok := <-q.returns:
+		if !ok {
+			return fmt.Errorf("rabbitmq return notification channel closed")
 		}
-
-		return fmt.Errorf("received unexpected returned message %q while publishing %q", returned.MessageId, messageID)
+		if returned.MessageId == message.MessageId {
+			return fmt.Errorf("rabbitmq returned unroutable message %q (reply code %d: %s)", returned.MessageId, returned.ReplyCode, returned.ReplyText)
+		}
+		return fmt.Errorf("unexpected returned message %q while publishing %q", returned.MessageId, message.MessageId)
 	default:
 	}
 
 	return nil
 }
 
-func (q *RabbitMQQueue) PublishInvitation(ctx context.Context, messageID string, body []byte) error {
-	q.pubMu.Lock()
-	defer q.pubMu.Unlock()
+func (q *RabbitMQQueue) Publish(ctx context.Context, routingKey string, body []byte) error {
+	return q.publishConfirmed(
+		ctx,
+		consts.IngestionExchangeName,
+		routingKey,
+		amqp.Publishing{
+			ContentType:  "application/json",
+			DeliveryMode: amqp.Persistent,
+			MessageId:    uuid.NewString(),
+			Body:         body,
+		},
+	)
+}
 
-	conf, err := q.pubCh.PublishWithDeferredConfirmWithContext(
+func (q *RabbitMQQueue) PublishInvitation(ctx context.Context, messageID string, body []byte) error {
+	return q.publishConfirmed(
 		ctx,
 		consts.InvitationExchange,
 		consts.InvitationRoutingKey,
-		false,
-		false,
 		amqp.Publishing{
 			ContentType:  "application/json",
 			DeliveryMode: amqp.Persistent,
@@ -271,17 +272,6 @@ func (q *RabbitMQQueue) PublishInvitation(ctx context.Context, messageID string,
 			Body:         body,
 		},
 	)
-	if err != nil {
-		return fmt.Errorf("publish invitation: %w", err)
-	}
-	acked, err := conf.WaitContext(ctx)
-	if err != nil {
-		return fmt.Errorf("wait for broker confirm: %w", err)
-	}
-	if !acked {
-		return errors.New("broker nacked invitation message")
-	}
-	return nil
 }
 
 var ErrPermanent = errors.New("permanent failure")
@@ -296,53 +286,97 @@ type RetryOptions struct {
 }
 
 func (q *RabbitMQQueue) ConsumeWithRetry(ctx context.Context, opts RetryOptions, handler func(ctx context.Context, body []byte) error) error {
+	if opts.Queue == "" {
+		return errors.New("retry consumer queue must not be empty")
+	}
+	if opts.Exchange == "" || opts.RetryKey == "" || opts.DeadKey == "" {
+		return errors.New("retry exchange and routing keys must not be empty")
+	}
+	if opts.MaxAttempts < 1 {
+		return errors.New("max retry attempts must be at least 1")
+	}
+	if opts.Concurrency < 1 {
+		return errors.New("retry consumer concurrency must be at least 1")
+	}
+
 	ch, err := q.conn.Channel()
 	if err != nil {
 		return fmt.Errorf("open consumer channel: %w", err)
 	}
 
-	defer ch.Close()
+	consumerTag := "retry-" + uuid.NewString()
 	if err := ch.Qos(opts.Concurrency, 0, false); err != nil {
+		_ = ch.Close()
 		return fmt.Errorf("set qos: %w", err)
 	}
 
-	deliveries, err := ch.Consume(consts.InvitationQueue, "", false, false, false, false, nil)
+	deliveries, err := ch.Consume(opts.Queue, consumerTag, false, false, false, false, nil)
 	if err != nil {
-		return fmt.Errorf("start consuming: %w", err)
+		_ = ch.Close()
+		return fmt.Errorf("start consuming queue %q: %w", opts.Queue, err)
 	}
-	jobCtx := context.WithoutCancel(ctx)
+
+	workerCtx, cancelWorkers := context.WithCancel(ctx)
 	var wg sync.WaitGroup
-	defer wg.Wait()
+	workerErr := make(chan error, 1)
 	sem := make(chan struct{}, opts.Concurrency)
+
+	// Stop new deliveries, ask in-flight handlers to stop, and let workers
+	// finish while the channel is still open. Closing the channel then
+	// requeues anything left unacknowledged.
+	defer func() {
+		_ = ch.Cancel(consumerTag, false)
+		cancelWorkers()
+		wg.Wait()
+		_ = ch.Close()
+	}()
+
 	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+
+		case err := <-workerErr:
+			return err
+
 		case d, ok := <-deliveries:
 			if !ok {
 				return errors.New("delivery channel closed")
 			}
+
 			select {
 			case sem <- struct{}{}:
 			case <-ctx.Done():
-				_ = d.Nack(false, true)
 				return ctx.Err()
 			}
+
 			wg.Add(1)
 			go func(d amqp.Delivery) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				processWithRetry(jobCtx, ch, opts, d, handler)
+
+				if err := processWithRetry(workerCtx, q, opts, d, handler); err != nil {
+					select {
+					case workerErr <- fmt.Errorf("process delivery %q: %w", d.MessageId, err):
+					default:
+					}
+				}
 			}(d)
 		}
 	}
 }
 
-func processWithRetry(ctx context.Context, ch *amqp.Channel, opts RetryOptions, delivery amqp.Delivery, handler func(ctx context.Context, body []byte) error) {
+func processWithRetry(ctx context.Context, q *RabbitMQQueue, opts RetryOptions, delivery amqp.Delivery, handler func(ctx context.Context, body []byte) error) error {
 	err := handler(ctx, delivery.Body)
 	if err == nil {
-		_ = delivery.Ack(false)
-		return
+		if ackErr := delivery.Ack(false); ackErr != nil {
+			return fmt.Errorf("ack successful delivery: %w", ackErr)
+		}
+		return nil
 	}
 
 	attempt := 1
@@ -363,20 +397,30 @@ func processWithRetry(ctx context.Context, ch *amqp.Channel, opts RetryOptions, 
 		}
 	}
 
-	pubErr := ch.PublishWithContext(ctx, opts.Exchange, key, false, false, amqp.Publishing{
-		ContentType:  delivery.ContentType,
-		DeliveryMode: amqp.Persistent,
-		MessageId:    delivery.MessageId,
-		Headers:      headers,
-		Body:         delivery.Body,
-	})
-
-	if pubErr != nil {
-		_ = delivery.Nack(false, true)
-		return
+	publishErr := q.publishConfirmed(
+		ctx,
+		opts.Exchange,
+		key,
+		amqp.Publishing{
+			ContentType:  delivery.ContentType,
+			DeliveryMode: amqp.Persistent,
+			MessageId:    delivery.MessageId,
+			Headers:      headers,
+			Body:         delivery.Body,
+		},
+	)
+	if publishErr != nil {
+		if nackErr := delivery.Nack(false, true); nackErr != nil {
+			return fmt.Errorf("publish replacement failed: %v; nack original failed: %w", publishErr, nackErr)
+		}
+		return fmt.Errorf("publish replacement: %w", publishErr)
 	}
 
-	_ = delivery.Ack(false)
+	if ackErr := delivery.Ack(false); ackErr != nil {
+		return fmt.Errorf("ack original after replacement publish: %w", ackErr)
+	}
+
+	return nil
 }
 
 func (q *RabbitMQQueue) Consume(ctx context.Context, queueName string, handler func([]byte) error) error {
