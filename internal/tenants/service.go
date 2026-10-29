@@ -26,7 +26,7 @@ type InvitationPublisher interface {
 	PublishInvitation(ctx context.Context, messageID string, body []byte) error
 }
 type TenantMutation interface {
-	CreateTenantInvitations(ctx context.Context, tenantID, invitedBy uuid.UUID, invites []models.NewInvitation, expiresAt time.Time) error
+	CreateTenantInvitations(ctx context.Context, tenantID, invitedBy uuid.UUID, invites []models.NewInvitation, expiresAt time.Time, outbox []models.OutboxMessage) error
 }
 type TenantService struct {
 	userReader    UserReader
@@ -44,7 +44,11 @@ func NewTenantService(cfg *models.Config, userReader UserReader, repo *TenantRep
 	}
 }
 
-func (ts *TenantService) InviteUsers(ctx context.Context, ownerTenantID, userID uuid.UUID, req *models.InviteUsers) error {
+func (ts *TenantService) InviteUsers(
+	ctx context.Context,
+	ownerTenantID, userID uuid.UUID,
+	req *models.InviteUsers,
+) error {
 	if ownerTenantID == uuid.Nil {
 		return errs.ErrTenantIDRequired
 	}
@@ -63,7 +67,10 @@ func (ts *TenantService) InviteUsers(ctx context.Context, ownerTenantID, userID 
 		return fmt.Errorf("verify tenant membership: %w", err)
 	}
 
-	if membership == nil || membership.TenantID != ownerTenantID || membership.UserID != userID || membership.Role != consts.RoleOwner {
+	if membership == nil ||
+		membership.TenantID != ownerTenantID ||
+		membership.UserID != userID ||
+		membership.Role != consts.RoleOwner {
 		return errs.ErrUnauthorized
 	}
 
@@ -75,8 +82,10 @@ func (ts *TenantService) InviteUsers(ctx context.Context, ownerTenantID, userID 
 		if err != nil {
 			return errs.ErrInvalidInvitation
 		}
+
 		email := strings.ToLower(addr.Address)
 		role := consts.Role(strings.TrimSpace(u.Role))
+
 		switch role {
 		case consts.RoleAdmin, consts.RoleMember, consts.RoleViewer:
 		default:
@@ -92,6 +101,7 @@ func (ts *TenantService) InviteUsers(ctx context.Context, ownerTenantID, userID 
 		if err != nil {
 			return fmt.Errorf("generate invitation token: %w", err)
 		}
+
 		invites = append(invites, models.PendingInvite{
 			Name:  u.Name,
 			Email: email,
@@ -102,16 +112,17 @@ func (ts *TenantService) InviteUsers(ctx context.Context, ownerTenantID, userID 
 	}
 
 	expiresAt := time.Now().UTC().Add(consts.InvitationTTL)
-	rows := make([]models.NewInvitation, len(invites))
-	for i, inv := range invites {
-		rows[i] = models.NewInvitation{Email: inv.Email, Role: inv.Role, TokenHash: inv.Hash}
-	}
-	if err := ts.TenantMutator.CreateTenantInvitations(ctx, ownerTenantID, userID, rows, expiresAt); err != nil {
-		return fmt.Errorf("create invitations: %w", err)
-	}
-	var publishErrs []error
 
-	for _, inv := range invites {
+	rows := make([]models.NewInvitation, len(invites))
+	msgs := make([]models.OutboxMessage, len(invites))
+
+	for i, inv := range invites {
+		rows[i] = models.NewInvitation{
+			Email:     inv.Email,
+			Role:      inv.Role,
+			TokenHash: inv.Hash,
+		}
+
 		msg := models.InvitationEmailMessage{
 			MessageID:     uuid.NewString(),
 			TenantID:      ownerTenantID,
@@ -121,15 +132,22 @@ func (ts *TenantService) InviteUsers(ctx context.Context, ownerTenantID, userID 
 			Token:         inv.Token,
 			CreatedAt:     time.Now().UTC(),
 		}
+
 		body, err := json.Marshal(msg)
 		if err != nil {
-			publishErrs = append(publishErrs, fmt.Errorf("encode invitation for %s: %w", inv.Email, err))
-			continue
+			return fmt.Errorf("encode invitation for %s: %w", inv.Email, err)
 		}
-		if err := ts.publisher.PublishInvitation(ctx, msg.MessageID, body); err != nil {
-			publishErrs = append(publishErrs, fmt.Errorf("queue invitation for %s: %w", inv.Email, err))
+
+		msgs[i] = models.OutboxMessage{
+			ID:      msg.MessageID,
+			Kind:    "invitation.email",
+			Payload: body,
 		}
 	}
 
-	return errors.Join(publishErrs...)
+	if err := ts.TenantMutator.CreateTenantInvitations(ctx, ownerTenantID, userID, rows, expiresAt, msgs); err != nil {
+		return fmt.Errorf("create invitations: %w", err)
+	}
+
+	return nil
 }

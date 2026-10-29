@@ -75,6 +75,7 @@ func HTTPStatus(err error) int {
 		errors.Is(err, ErrInvalidSelectionToken),
 		errors.Is(err, ErrEmailNotVerified),
 		errors.Is(err, ErrCurrentPasswordIncorrect):
+		errors.Is(err, ErrRefreshReuseDetected)
 
 		return http.StatusUnauthorized
 

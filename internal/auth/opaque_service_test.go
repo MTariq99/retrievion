@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,7 +15,9 @@ import (
 )
 
 type testOpaqueStore struct {
-	tokens map[string]*models.OpaqueToken
+	tokens   map[string]*models.OpaqueToken
+	mu       sync.Mutex
+	consumed map[string]time.Time
 }
 
 func newTestOpaqueStore() *testOpaqueStore {
@@ -236,4 +239,42 @@ func TestRefreshAccessToken_RejectsServiceToken(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected service token to be rejected by user refresh flow")
 	}
+}
+
+// add a consumed map to each stub struct and initialise it in its constructor
+//   consumed map[string]bool
+
+func (s *testOpaqueStore) ConsumeToken(ctx context.Context, tokenID string) (*models.OpaqueToken, error) {
+	s.mu.Lock() // drop the locking if your stub doesn't have a mutex
+	defer s.mu.Unlock()
+
+	tok, ok := s.tokens[tokenID]
+	if !ok || time.Now().After(tok.ExpiresAt) {
+		return nil, errs.ErrTokenNotFound
+	}
+	if s.consumed == nil {
+		s.consumed = make(map[string]time.Time)
+	}
+	// ...
+	if _, done := s.consumed[tokenID]; done {
+		return nil, errs.ErrTokenAlreadyConsumed
+	}
+	s.consumed[tokenID] = time.Now()
+
+	cp := *tok // return a copy, like the Redis version does
+	return &cp, nil
+}
+
+func (s *testOpaqueStore) ReleaseToken(ctx context.Context, tokenID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.consumed, tokenID)
+	return nil
+}
+
+func (s *testOpaqueStore) ConsumedAt(ctx context.Context, tokenID string) (time.Time, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.consumed[tokenID]
+	return t, ok, nil
 }

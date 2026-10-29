@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/internal/errs"
 	"github.com/mtariq99/retrievion/internal/response"
 	"github.com/mtariq99/retrievion/models"
@@ -127,13 +128,18 @@ func (h *Handler) Refresh(c *gin.Context) {
 }
 
 func (h *Handler) Logout(c *gin.Context) {
-	tokenID, exists := c.Get("opaque_token_id")
+	userIDAny, exists := c.Get(consts.UserID)
 	if !exists {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "no active session"})
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "user ID is required"})
+		return
+	}
+	userID, err := utils.ParseUUID(userIDAny.(string), "user id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: err.Error()})
 		return
 	}
 
-	if err := h.tokenService.RevokeToken(c.Request.Context(), tokenID.(string)); err != nil {
+	if err := h.tokenService.RevokeAllUserTokens(c.Request.Context(), userID); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "failed to revoke token"})
 		return
 	}

@@ -41,3 +41,9 @@ type InvitationEmailMessage struct {
 	Token         string      `json:"token"`
 	CreatedAt     time.Time   `json:"created_at"`
 }
+
+type OutboxMessage struct {
+	ID      string // reuse InvitationEmailMessage.MessageID
+	Kind    string // "invitation.email"
+	Payload []byte
+}

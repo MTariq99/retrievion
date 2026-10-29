@@ -18,12 +18,22 @@ import (
 	"github.com/mtariq99/retrievion/internal/storage"
 	"github.com/mtariq99/retrievion/internal/tokenizer"
 
+	"github.com/mtariq99/retrievion/internal/tenants"
 	"github.com/mtariq99/retrievion/pkg/objectstorage"
 )
 
 func InitializeWorker(db *sql.DB, logger *zap.Logger) (*Workers, func(), error) {
 	wire.Build(
 		config.Load,
+
+		// invitation outbox
+		tenants.NewTanantRepository,
+		tenants.NewOutboxRelay,
+		wire.Bind(
+			new(tenants.InvitationPublisher),
+			new(*storage.RabbitMQQueue),
+		),
+
 		notifications.NewEmailService,
 		notifications.NewInvitationWorker,
 		wire.Struct(new(Workers), "*"),

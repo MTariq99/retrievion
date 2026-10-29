@@ -4,6 +4,7 @@ import (
 	"github.com/mtariq99/retrievion/internal/document"
 	"github.com/mtariq99/retrievion/internal/ingestion"
 	"github.com/mtariq99/retrievion/internal/notifications"
+	"github.com/mtariq99/retrievion/internal/tenants"
 )
 
 type Workers struct {
@@ -11,4 +12,5 @@ type Workers struct {
 	Invitations     *notifications.InvitationWorker
 	OutboxPublisher *document.OutboxPublisher
 	Recovery        *ingestion.RecoveryWorker
+	OutboxRelay     *tenants.OutboxRelay
 }

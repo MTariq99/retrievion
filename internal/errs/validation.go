@@ -44,4 +44,7 @@ var (
 	ErrInvalidTenantID       = errors.New("invalid tenant id")
 	ErrTenantIDRequired      = errors.New("tenant ID is required")
 	ErrGenerateToken         = errors.New("error generating token")
+	ErrTokenNotFound         = errors.New("token not found")
+	ErrTokenAlreadyConsumed  = errors.New("token already consumed")
+	ErrRefreshReuseDetected  = errors.New("refresh token reuse detected")
 )

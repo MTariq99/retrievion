@@ -18,7 +18,8 @@ type Config struct {
 }
 
 type AppConfig struct {
-	Env string `mapstructure:"APP_ENV"`
+	Env   string `mapstructure:"APP_ENV"`
+	Batch int    `mapstructure:"OUTBOX_MESSAGES_BATCH"`
 }
 
 type ServerConfig struct {

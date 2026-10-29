@@ -14,6 +14,7 @@ import (
 	"github.com/mtariq99/retrievion/internal/ingestion"
 	"github.com/mtariq99/retrievion/internal/notifications"
 	"github.com/mtariq99/retrievion/internal/storage"
+	"github.com/mtariq99/retrievion/internal/tenants"
 	"github.com/mtariq99/retrievion/internal/tokenizer"
 	"github.com/mtariq99/retrievion/pkg/objectstorage"
 	"go.uber.org/zap"
@@ -56,11 +57,14 @@ func InitializeWorker(db *sql.DB, logger *zap.Logger) (*Workers, func(), error) 
 	documentRepository := document.NewRepository(db)
 	outboxPublisher := document.NewOutboxPublisher(documentRepository, queue, logger)
 	recoveryWorker := ingestion.NewRecoveryWorker(repository, logger)
+	tenantRepository := tenants.NewTanantRepository(db)
+	outboxRelay := tenants.NewOutboxRelay(modelsConfig, db, tenantRepository, rabbitMQQueue)
 	workers := &Workers{
 		Ingestion:       worker,
 		Invitations:     invitationWorker,
 		OutboxPublisher: outboxPublisher,
 		Recovery:        recoveryWorker,
+		OutboxRelay:     outboxRelay,
 	}
 	return workers, func() {
 	}, nil

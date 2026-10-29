@@ -60,6 +60,11 @@ func main() {
 		logger.Info("ingestion recovery worker starting")
 		return workers.Recovery.Run(gctx)
 	})
+	g.Go(func() error {
+		logger.Info("invitation outbox relay starting")
+		workers.OutboxRelay.Run(gctx)
+		return nil
+	})
 	errCh := make(chan error, 1)
 	go func() { errCh <- g.Wait() }()
 

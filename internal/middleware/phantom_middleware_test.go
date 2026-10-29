@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,11 +15,14 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/mtariq99/retrievion/internal/auth"
+	"github.com/mtariq99/retrievion/internal/errs"
 	"github.com/mtariq99/retrievion/models"
 )
 
 type middlewareTestTokenStore struct {
-	tokens map[string]*models.OpaqueToken
+	tokens   map[string]*models.OpaqueToken
+	mu       sync.Mutex
+	consumed map[string]time.Time
 }
 
 func newMiddlewareTestTokenStore(tokens ...*models.OpaqueToken) *middlewareTestTokenStore {
@@ -353,4 +357,39 @@ func TestRequireUserToken_AfterPhantomExchange(t *testing.T) {
 			}
 		})
 	}
+}
+
+func (s *middlewareTestTokenStore) ConsumeToken(ctx context.Context, tokenID string) (*models.OpaqueToken, error) {
+	s.mu.Lock() // drop the locking if your stub doesn't have a mutex
+	defer s.mu.Unlock()
+
+	tok, ok := s.tokens[tokenID]
+	if !ok || time.Now().After(tok.ExpiresAt) {
+		return nil, errs.ErrTokenNotFound
+	}
+	if s.consumed == nil {
+		s.consumed = make(map[string]time.Time)
+	}
+	// ...
+	if _, done := s.consumed[tokenID]; done {
+		return nil, errs.ErrTokenAlreadyConsumed
+	}
+	s.consumed[tokenID] = time.Now()
+
+	cp := *tok // return a copy, like the Redis version does
+	return &cp, nil
+}
+
+func (s *middlewareTestTokenStore) ReleaseToken(ctx context.Context, tokenID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.consumed, tokenID)
+	return nil
+}
+
+func (s *middlewareTestTokenStore) ConsumedAt(ctx context.Context, tokenID string) (time.Time, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.consumed[tokenID]
+	return t, ok, nil
 }

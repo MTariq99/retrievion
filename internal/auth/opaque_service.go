@@ -4,13 +4,16 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/internal/enums"
+	"github.com/mtariq99/retrievion/internal/errs"
 	"github.com/mtariq99/retrievion/models"
 )
 
@@ -19,6 +22,9 @@ type OpaqueTokenStore interface {
 	GetToken(ctx context.Context, tokenID string) (*models.OpaqueToken, error)
 	RevokeToken(ctx context.Context, tokenID string) error
 	RevokeAllUserTokens(ctx context.Context, userID uuid.UUID) error
+	ReleaseToken(ctx context.Context, tokenID string) error
+	ConsumeToken(ctx context.Context, tokenID string) (*models.OpaqueToken, error)
+	ConsumedAt(ctx context.Context, tokenID string) (time.Time, bool, error)
 }
 type TenantMembershipReader interface {
 	GetMembership(ctx context.Context, tenantID uuid.UUID, userID uuid.UUID) (*models.TenantMember, error)
@@ -142,21 +148,31 @@ func (s *OpaqueTokenService) IntrospectToken(ctx context.Context, tokenID string
 func (s *OpaqueTokenService) RefreshAccessToken(ctx context.Context, refreshTokenID, clientIP, userAgent string) (*models.TokenPair, error) {
 	introspection, err := s.IntrospectToken(ctx, refreshTokenID)
 	if err != nil || !introspection.Active {
-		return nil, fmt.Errorf("invalid or expired refresh token")
+		return nil, s.handleReplay(ctx, refreshTokenID)
 	}
 
-	refreshToken, err := s.redis.GetToken(ctx, refreshTokenID)
+	peek, err := s.redis.GetToken(ctx, refreshTokenID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get refresh token: %w", err)
 	}
-	if refreshToken.TokenType != "refresh" {
+	if peek.TokenType != "refresh" {
 		return nil, fmt.Errorf("token is not a refresh token")
 	}
-	if refreshToken.IsService {
+	if peek.IsService {
 		return nil, fmt.Errorf("service tokens cannot be refreshed through user refresh flow")
 	}
-	if err = s.ValidateUserTenantMembership(ctx, refreshToken.TenantID, refreshToken.UserID); err != nil {
+	if err = s.ValidateUserTenantMembership(ctx, peek.TenantID, peek.UserID); err != nil {
 		return nil, fmt.Errorf("refresh token tenant membership is invalid: %w", err)
+	}
+	refreshToken, err := s.redis.ConsumeToken(ctx, refreshTokenID)
+	if err != nil {
+		if errors.Is(err, errs.ErrTokenAlreadyConsumed) {
+			return nil, s.handleReplay(ctx, refreshTokenID)
+		}
+		return nil, fmt.Errorf("invalid or expired refresh token")
+	}
+	if refreshToken.Revoked {
+		return nil, fmt.Errorf("invalid or expired refresh token")
 	}
 
 	user := &models.User{
@@ -166,17 +182,19 @@ func (s *OpaqueTokenService) RefreshAccessToken(ctx context.Context, refreshToke
 		Role:  enums.UserRole(refreshToken.UserRole),
 	}
 
-	accessToken, err := s.generateOpaqueToken(ctx, user, refreshToken.TenantID, "access", s.config.AccessTokenTTL, clientIP, userAgent)
+	tokenPair, err := s.GenerateTokenPair(ctx, user, refreshToken.TenantID, clientIP, userAgent)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate new access token: %w", err)
+		if relErr := s.redis.ReleaseToken(ctx, refreshTokenID); relErr != nil {
+			log.Printf("release refresh token failed: %v", relErr)
+		}
+		return nil, fmt.Errorf("failed to generate token pair: %w", err)
 	}
 
-	return &models.TokenPair{
-		AccessToken:  accessToken,
-		RefreshToken: refreshTokenID,
-		TokenType:    "Bearer",
-		ExpiresIn:    int64(s.config.AccessTokenTTL.Seconds()),
-	}, nil
+	if err := s.RevokeToken(ctx, refreshTokenID); err != nil {
+		log.Printf("failed to mark old refresh token revoked (already consumed): %v", err)
+	}
+
+	return tokenPair, nil
 }
 
 func (s *OpaqueTokenService) RevokeToken(ctx context.Context, tokenID string) error {
@@ -234,4 +252,27 @@ func (s *OpaqueTokenService) ValidateUserTenantMembership(ctx context.Context, t
 		return fmt.Errorf("tenant membership does not match token")
 	}
 	return nil
+}
+
+func classifyReplay(consumedAt, now time.Time, grace time.Duration) consts.ReplayVerdict {
+	if now.Sub(consumedAt) <= grace {
+		return consts.ReplayRetry
+	}
+	return consts.ReplayTheft
+}
+
+func (s *OpaqueTokenService) handleReplay(ctx context.Context, tokenID string) error {
+	at, ok, err := s.redis.ConsumedAt(ctx, tokenID)
+	if err != nil || !ok {
+		return fmt.Errorf("invalid or expired refresh token")
+	}
+	if classifyReplay(at, time.Now(), consts.RefreshReuseGrace) == consts.ReplayRetry {
+		return fmt.Errorf("refresh token already used")
+	}
+	if tok, err := s.redis.GetToken(ctx, tokenID); err == nil {
+		if err := s.redis.RevokeAllUserTokens(ctx, tok.UserID); err != nil {
+			log.Printf("revoke-all after reuse failed for user %s: %v", tok.UserID, err)
+		}
+	}
+	return errs.ErrRefreshReuseDetected
 }

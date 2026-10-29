@@ -36,18 +36,20 @@ func (f *invitationTestUserReader) GetMembership(
 }
 
 type invitationTestMutator struct {
-	calls int
-	err   error
+	calls  int
+	err    error
+	outbox []models.OutboxMessage
 }
 
 func (f *invitationTestMutator) CreateTenantInvitations(
-	context.Context,
-	uuid.UUID,
-	uuid.UUID,
-	[]models.NewInvitation,
-	time.Time,
+	ctx context.Context,
+	tenantID, invitedBy uuid.UUID,
+	invites []models.NewInvitation,
+	expiresAt time.Time,
+	outbox []models.OutboxMessage,
 ) error {
 	f.calls++
+	f.outbox = append(f.outbox, outbox...)
 	return f.err
 }
 
@@ -165,10 +167,24 @@ func TestInviteUsersAuthorization(t *testing.T) {
 				t.Fatalf("expected success, got %v", err)
 			}
 			if mutator.calls != 1 {
-				t.Errorf("expected one invitation write, got %d", mutator.calls)
+				t.Fatalf("expected one invitation write, got %d", mutator.calls)
 			}
-			if publisher.calls != 1 {
-				t.Errorf("expected one publication, got %d", publisher.calls)
+
+			if len(mutator.outbox) != 1 {
+				t.Fatalf("expected one outbox message, got %d", len(mutator.outbox))
+			}
+
+			if mutator.outbox[0].Kind != "invitation.email" {
+				t.Errorf("expected outbox kind %q, got %q",
+					"invitation.email", mutator.outbox[0].Kind)
+			}
+
+			if len(mutator.outbox[0].Payload) == 0 {
+				t.Error("expected non-empty outbox payload")
+			}
+
+			if publisher.calls != 0 {
+				t.Errorf("expected no direct publication, got %d", publisher.calls)
 			}
 		})
 	}
