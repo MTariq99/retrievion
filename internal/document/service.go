@@ -176,13 +176,7 @@ func (s *Service) UploadDocument(ctx context.Context, userID, tenantID uuid.UUID
 			return err
 		}
 
-		if err := tx.CreateOutboxEvent(
-			ctx,
-			outboxID,
-			"ingestion.job.created",
-			jobID,
-			body,
-		); err != nil {
+		if err := tx.CreateOutboxEvent(ctx, outboxID, consts.EventTypeIngestionJobCreated, jobID, body); err != nil {
 			return err
 		}
 

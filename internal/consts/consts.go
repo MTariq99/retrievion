@@ -193,6 +193,7 @@ const (
 	IngestionDeadLetterExchangeName = "ingestion.dlx"
 	IngestionDeadLetterQueueName    = "ingestion.jobs.dlq"
 	IngestionDeadLetterRoutingKey   = "ingestion.jobs.dead"
+	EventTypeIngestionJobCreated    = "ingestion.job.created"
 )
 
 // ============================================================

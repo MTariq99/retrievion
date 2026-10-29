@@ -2,10 +2,12 @@ package document
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/internal/storage"
 )
 
@@ -59,7 +61,10 @@ func (p *OutboxPublisher) publishBatch(ctx context.Context) error {
 			return ctx.Err()
 		}
 
-		err := p.queue.Publish(ctx, event.EventType, event.Payload)
+		rk, err := routingKeyFor(event.EventType)
+		if err == nil {
+			err = p.queue.Publish(ctx, rk, event.Payload)
+		}
 		if err == nil {
 			err = p.repo.MarkOutboxEventPublished(ctx, event)
 			if err == nil {
@@ -94,4 +99,13 @@ func retryDelay(attempts int) time.Duration {
 		attempts = 8
 	}
 	return time.Duration(1<<attempts) * time.Second
+}
+
+func routingKeyFor(eventType string) (string, error) {
+	switch eventType {
+	case consts.EventTypeIngestionJobCreated:
+		return consts.IngestionRoutingKey, nil
+	default:
+		return "", fmt.Errorf("no routing key for outbox event type %q", eventType)
+	}
 }
