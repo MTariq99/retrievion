@@ -56,6 +56,16 @@ const (
 	ReplayRetry          ReplayVerdict = iota // within grace: reject, keep sessions
 	ReplayTheft                               // after grace: revoke everything
 	DefaultOutboxBatch   = 50
+	ReclaimAfter         = 5 * time.Minute // must exceed the longest send (20s timeout)
+	StatusTimeout        = 5 * time.Second
+)
+
+type DeliveryState int
+
+const (
+	DeliveryClaimed DeliveryState = iota
+	DeliveryAlreadySent
+	DeliveryInProgress
 )
 
 type ContextKey string

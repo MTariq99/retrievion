@@ -469,9 +469,7 @@ Tests live next to the code as `*_test.go` files.
 
 **Not implemented:**
 
-* Invitation acceptance endpoint. Invitation emails link to a frontend `/accept-invitation?token=...` page, but this repository has no backend route that redeems the token.
 * Resend or revoke invitation endpoints.
-* Idempotent invitation delivery. Delivery is at least once, so a crash between sending and acknowledging, or a relay failure after publishing, can produce a duplicate email.
 * Automatic retries for ingestion jobs that fail. Only jobs stuck in `processing` are recovered.
 * Query rewriting.
 * Fine-grained retrieval permissions. Retrieval is scoped to the tenant, not to individual users or documents.
@@ -483,20 +481,6 @@ Tests live next to the code as `*_test.go` files.
 * No Kafka. RabbitMQ is used for queueing.
 * No separate vector database. pgvector is used.
 
----
-
-## Roadmap
-
-* Invitation acceptance, resend, and revoke endpoints
-* Idempotency check in the invitation worker
-* Retry policy for failed ingestion jobs
-* Query rewriting and richer retrieval strategies
-* Document-level authorization
-* Automated evaluation gates and retrieval/evaluation dashboards
-* Additional LLM and embedding providers
-* Kubernetes deployment
-* Richer caching
-* Better evaluation datasets and judge calibration
 
 ---
 

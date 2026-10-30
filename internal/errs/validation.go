@@ -48,4 +48,5 @@ var (
 	ErrTokenAlreadyConsumed   = errors.New("token already consumed")
 	ErrRefreshReuseDetected   = errors.New("refresh token reuse detected")
 	ErrInvalidInvitationToken = errors.New("invalid invitation token")
+	ErrDeliveryInProgress     = errors.New("invitation delivery in progress on another worker")
 )

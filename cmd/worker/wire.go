@@ -35,6 +35,11 @@ func InitializeWorker(db *sql.DB, logger *zap.Logger) (*Workers, func(), error) 
 		),
 
 		notifications.NewEmailService,
+		notifications.NewNotificationRepository,
+		wire.Bind(
+			new(notifications.DeliveryStore),
+			new(*notifications.NotificationRepository),
+		),
 		notifications.NewInvitationWorker,
 		wire.Struct(new(Workers), "*"),
 		objectstorage.NewB2Storage,
