@@ -128,8 +128,12 @@ func run() error {
 	}
 
 	llmService := llm.NewService(llmClient, cfg, llm.NewPricing(cfg), logger)
+	reranker, err := retrieval.ProvideReranker(cfg)
+	if err != nil {
+		return fmt.Errorf("initialize reranker: %w", err)
+	}
 
-	retrievalService := retrieval.NewService(retrieval.NewVectorRepository(db), retrieval.NewKeywordRepository(db), retrieval.NewFusion(), retrieval.NewNoopReranker())
+	retrievalService := retrieval.NewService(retrieval.NewVectorRepository(db), retrieval.NewKeywordRepository(db), retrieval.NewFusion(), reranker)
 
 	promptBuilder := prompt.NewBuilder(counter)
 
