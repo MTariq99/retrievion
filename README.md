@@ -476,10 +476,6 @@ Tests live next to the code as `*_test.go` files.
 * Automated CI/CD evaluation gating.
 * Kubernetes deployment manifests.
 
-**Deliberate design choices:**
-
-* No Kafka. RabbitMQ is used for queueing.
-* No separate vector database. pgvector is used.
 
 
 ---
