@@ -165,6 +165,13 @@ const SectionSeparator = "\n\n"
 const (
 	DefaultRetrievalLimit = 20
 	FinalRetrievalTopN    = 10
+	DefaultCohereEndpoint = "https://api.cohere.com/v2/rerank"
+	DefaultCohereModel    = "rerank-v5.0-fast"
+	MinTimeout            = 10 * time.Second
+	MaxDocuments          = 1000
+	MaxErrorBody          = 4 << 10  // 4 KiB
+	MaxResponseBody       = 10 << 20 // 10 MiB
+	MaxRerankRetries      = 2
 )
 
 // ============================================================

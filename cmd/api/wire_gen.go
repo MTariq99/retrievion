@@ -71,8 +71,11 @@ func InitializeAPI(db *sql.DB, logger *zap.Logger) (*http.Handler, func(), error
 	vectorRepository := retrieval.NewVectorRepository(db)
 	keywordRepository := retrieval.NewKeywordRepository(db)
 	fusion := retrieval.NewFusion()
-	noopReranker := retrieval.NewNoopReranker()
-	retrievalService := retrieval.NewService(vectorRepository, keywordRepository, fusion, noopReranker)
+	reranker, err := retrieval.ProvideReranker(modelsConfig)
+	if err != nil {
+		return nil, nil, err
+	}
+	retrievalService := retrieval.NewService(vectorRepository, keywordRepository, fusion, reranker)
 	counter, err := tokenizer.NewCounter(modelsConfig)
 	if err != nil {
 		return nil, nil, err

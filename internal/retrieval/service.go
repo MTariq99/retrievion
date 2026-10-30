@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/bytedance/gopkg/util/logger"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 
 	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/models"
@@ -79,7 +81,8 @@ func (s *Service) Retrieve(ctx context.Context, query models.RetrievalQuery) ([]
 
 	rerankedResults, err := s.reranker.Rerank(ctx, query.Query, fusedResults)
 	if err != nil {
-		return nil, fmt.Errorf("rerank results: %w", err)
+		logger.Warn("rerank failed, using original order", zap.Error(err))
+		rerankedResults = fusedResults
 	}
 
 	if len(rerankedResults) > consts.FinalRetrievalTopN {

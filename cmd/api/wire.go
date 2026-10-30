@@ -96,11 +96,7 @@ func InitializeAPI(
 			new(retrieval.ResultFusion),
 			new(*retrieval.Fusion),
 		),
-		retrieval.NewNoopReranker,
-		wire.Bind(
-			new(retrieval.Reranker),
-			new(*retrieval.NoopReranker),
-		),
+		retrieval.ProvideReranker,
 		retrieval.NewService,
 
 		// Prompt

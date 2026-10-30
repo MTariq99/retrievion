@@ -82,8 +82,10 @@ type EmbeddingConfig struct {
 }
 
 type RerankerConfig struct {
-	Provider string `mapstructure:"RERANKER_PROVIDER"`
-	APIKey   string `mapstructure:"RERANKER_API_KEY"`
+	Provider        string `mapstructure:"RERANKER_PROVIDER"`
+	APIKey          string `mapstructure:"COHERE_RERANKER_API_KEY"`
+	RerankerModel   string `mapstructure:"COHERE_RERANK_MODEL"`
+	RerankerTimeout int    `mapstructure:"COHERE_RERANK_TIMEOUT"`
 }
 
 type AuthConfig struct {
