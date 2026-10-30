@@ -55,7 +55,7 @@ const (
 	RefreshReuseGrace                  = 10 * time.Second
 	ReplayRetry          ReplayVerdict = iota // within grace: reject, keep sessions
 	ReplayTheft                               // after grace: revoke everything
-
+	DefaultOutboxBatch   = 50
 )
 
 type ContextKey string

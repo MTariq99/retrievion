@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -173,4 +174,113 @@ func (d *TenantOutboxTx) Rollback() error {
 
 type TenantOutboxTx struct {
 	tx *sql.Tx
+}
+
+func (tr *TenantRepository) AcceptInvitation(
+	ctx context.Context,
+	userID uuid.UUID,
+	email string,
+	tokenHash []byte,
+) error {
+	if userID == uuid.Nil {
+		return errs.ErrIDRequired
+	}
+
+	if strings.TrimSpace(email) == "" || len(tokenHash) == 0 {
+		return errs.ErrInvalidInvitationToken
+	}
+
+	tx, err := tr.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin invitation acceptance transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	var (
+		invitationID    uuid.UUID
+		tenantID        uuid.UUID
+		invitationEmail string
+		role            consts.Role
+		status          string
+		expiresAt       time.Time
+	)
+
+	// 1. Find and lock the invitation.
+	err = tx.QueryRowContext(ctx, `
+        SELECT id, tenant_id, email, role, status, expires_at
+        FROM tenant_invitations
+        WHERE token_hash = $1
+        FOR UPDATE
+    `, tokenHash).Scan(
+		&invitationID,
+		&tenantID,
+		&invitationEmail,
+		&role,
+		&status,
+		&expiresAt,
+	)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		return errs.ErrInvalidInvitationToken
+	}
+
+	if err != nil {
+		return fmt.Errorf("find invitation: %w", err)
+	}
+
+	// 2. Validate invitation.
+	if consts.InvitationStatus(status) != consts.InvitationStatusPending ||
+		!expiresAt.After(time.Now().UTC()) ||
+		!strings.EqualFold(
+			strings.TrimSpace(invitationEmail),
+			strings.TrimSpace(email),
+		) {
+		return errs.ErrInvalidInvitationToken
+	}
+
+	// 3. Create membership without overwriting an existing role.
+	_, err = tx.ExecContext(ctx, `
+        INSERT INTO tenant_members (tenant_id, user_id, role)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (tenant_id, user_id) DO NOTHING
+    `, tenantID, userID, role)
+	if err != nil {
+		return fmt.Errorf("create tenant membership: %w", err)
+	}
+
+	// 4. Mark invitation accepted.
+	result, err := tx.ExecContext(
+		ctx, `
+        UPDATE tenant_invitations
+        SET
+            status = $2,
+            accepted_by_user_id = $3,
+            accepted_at = NOW()
+        WHERE id = $1
+          AND status = $4
+    `,
+		invitationID,
+		consts.InvitationStatusAccepted,
+		userID,
+		consts.InvitationStatusPending,
+	)
+	if err != nil {
+		return fmt.Errorf("mark invitation accepted: %w", err)
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check invitation update: %w", err)
+	}
+
+	if affected != 1 {
+		return errs.ErrInvalidInvitationToken
+	}
+
+	// 5. Commit both changes together.
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit invitation acceptance: %w", err)
+	}
+
+	return nil
 }

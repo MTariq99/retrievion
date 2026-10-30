@@ -53,6 +53,10 @@ func (f *invitationTestMutator) CreateTenantInvitations(
 	return f.err
 }
 
+func (f *invitationTestMutator) AcceptInvitation(context.Context, uuid.UUID, string, []byte) error {
+	return nil
+}
+
 type invitationTestPublisher struct {
 	calls int
 	err   error

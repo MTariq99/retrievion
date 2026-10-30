@@ -2,7 +2,7 @@ package models
 
 type ErrorResponse struct {
 	Error string `json:"error"`
-	Code  string `json:"code"`
+	Code  int    `json:"code"`
 }
 
 type SuccessResponse struct {

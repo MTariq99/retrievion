@@ -98,6 +98,72 @@ func GetUserClaims(c *gin.Context) (*jwtclaims.UserClaims, bool) {
 	return claims, true
 }
 
+func GetUserClaimsWithoutTenant(c *gin.Context) (*jwtclaims.UserClaims, bool) {
+	userIdVal, exists := c.Get(consts.UserID)
+	if !exists {
+		return nil, false
+	}
+	userId, ok := userIdVal.(uuid.UUID)
+	if !ok {
+		return nil, false
+	}
+
+	userEmailVal, exists := c.Get(consts.UserEmail)
+	if !exists {
+		return nil, false
+	}
+	userEmail, ok := userEmailVal.(string)
+	if !ok {
+		return nil, false
+	}
+
+	opaqueTokenIdVal, exists := c.Get(consts.OpaqueTokenID)
+	if !exists {
+		return nil, false
+	}
+	opaqueTokenId, ok := opaqueTokenIdVal.(string)
+	if !ok {
+		return nil, false
+	}
+
+	IsServiceBool, exists := c.Get(consts.IsService)
+	if !exists {
+		return nil, false
+	}
+	IsService, ok := IsServiceBool.(bool)
+	if !ok {
+		return nil, false
+	}
+	clientIDVal, exists := c.Get(consts.ClientID)
+	if !exists {
+		return nil, false
+	}
+	clientID, ok := clientIDVal.(string)
+	if !ok {
+		return nil, false
+	}
+
+	userRoleVal, exists := c.Get(consts.UserRole)
+	if !exists {
+		return nil, false
+	}
+	userRole, ok := userRoleVal.(enums.UserRole)
+	if !ok {
+		return nil, false
+	}
+
+	claims := &jwtclaims.UserClaims{
+		UserId:            userId,
+		UserEmail:         userEmail,
+		UserOpaqueTokenId: opaqueTokenId,
+		IsService:         IsService,
+		ClientID:          clientID,
+		UserRole:          userRole,
+	}
+
+	return claims, true
+}
+
 func HashToken(token string) string {
 	hash := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(hash[:])

@@ -12,3 +12,10 @@ func WriteErrorResponse(c *gin.Context, message string, status int) {
 		Status:  status,
 	})
 }
+
+func ErrResp(code int, err string) models.ErrorResponse {
+	return models.ErrorResponse{
+		Error: err,
+		Code:  code,
+	}
+}

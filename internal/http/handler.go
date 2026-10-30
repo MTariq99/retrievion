@@ -78,4 +78,5 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	{
 		tenantsInvitations.POST("", h.TenantHandler.InviteUsers)
 	}
+	r.POST("/api/v1/tenants/invitations/accept", h.phantom.ExchangeOpaqueForJWTWithoutTenant(), middleware.RequireUserToken(), h.TenantHandler.AcceptInvitation)
 }

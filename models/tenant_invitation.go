@@ -47,3 +47,7 @@ type OutboxMessage struct {
 	Kind    string // "invitation.email"
 	Payload []byte
 }
+
+type AcceptInvitationRequest struct {
+	Token string `json:"token" binding:"required"`
+}

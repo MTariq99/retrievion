@@ -114,13 +114,13 @@ func (h *Handler) Me(c *gin.Context) {
 func (h *Handler) Refresh(c *gin.Context) {
 	var req models.RefreshRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: err.Error()})
+		c.JSON(http.StatusBadRequest, response.ErrResp(http.StatusBadRequest, err.Error()))
 		return
 	}
 
 	pair, err := h.tokenService.RefreshAccessToken(c.Request.Context(), req.RefreshToken, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{Error: "invalid or expired refresh token"})
+		c.JSON(http.StatusUnauthorized, response.ErrResp(http.StatusUnauthorized, "invalid or expired refresh token"))
 		return
 	}
 
@@ -130,17 +130,17 @@ func (h *Handler) Refresh(c *gin.Context) {
 func (h *Handler) Logout(c *gin.Context) {
 	userIDAny, exists := c.Get(consts.UserID)
 	if !exists {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "user ID is required"})
+		c.JSON(http.StatusBadRequest, response.ErrResp(http.StatusBadRequest, "user ID is required"))
 		return
 	}
 	userID, err := utils.ParseUUID(userIDAny.(string), "user id")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: err.Error()})
+		c.JSON(http.StatusBadRequest, response.ErrResp(http.StatusBadRequest, err.Error()))
 		return
 	}
 
 	if err := h.tokenService.RevokeAllUserTokens(c.Request.Context(), userID); err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "failed to revoke token"})
+		c.JSON(http.StatusInternalServerError, response.ErrResp(http.StatusInternalServerError, "failed to revoke token"))
 		return
 	}
 

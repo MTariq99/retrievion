@@ -17,6 +17,7 @@ import (
 	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/internal/enums"
 	"github.com/mtariq99/retrievion/internal/jwtclaims"
+	"github.com/mtariq99/retrievion/internal/response"
 	"github.com/mtariq99/retrievion/models"
 	"go.uber.org/zap"
 )
@@ -50,15 +51,13 @@ func (m *PhantomTokenMiddleware) ExchangeOpaqueForJWT() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.Request.Header.Get("Authorization")
 		if len(authHeader) == 0 {
-			c.AbortWithStatusJSON(http.StatusUnauthorized,
-				models.ErrorResponse{Error: "missing authorization token"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, response.ErrResp(http.StatusUnauthorized, "missing authorization token"))
 			return
 		}
 
 		tokenParts := strings.Split(authHeader, " ")
 		if len(tokenParts) != 2 || strings.ToUpper(tokenParts[0]) != "BEARER" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized,
-				models.ErrorResponse{Error: "invalid authorization token format"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, response.ErrResp(http.StatusUnauthorized, "invalid authorization token format"))
 			return
 		}
 
@@ -70,26 +69,23 @@ func (m *PhantomTokenMiddleware) ExchangeOpaqueForJWT() gin.HandlerFunc {
 		introspection, err := m.opaqueService.IntrospectToken(ctx, opaqueToken)
 		if err != nil || !introspection.Active {
 			m.logger.Warn("token introspection failed", zap.Error(err), zap.String("path", c.Request.URL.Path))
-			c.AbortWithStatusJSON(http.StatusUnauthorized,
-				models.ErrorResponse{Error: "invalid or expired token"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, response.ErrResp(http.StatusUnauthorized, "invalid or expired token"))
 			return
 		}
 
 		if introspection.IsService {
 			if introspection.TokenType != "service" || introspection.ClientID == "" {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, models.ErrorResponse{Error: "invalid service token"})
+				c.AbortWithStatusJSON(http.StatusUnauthorized, response.ErrResp(http.StatusUnauthorized, "invalid service token"))
 				return
 			}
 		} else {
 			if introspection.TokenType != "access" || introspection.UserID == uuid.Nil || introspection.TenantID == uuid.Nil {
-				c.AbortWithStatusJSON(http.StatusUnauthorized,
-					models.ErrorResponse{Error: "invalid access token"})
+				c.AbortWithStatusJSON(http.StatusUnauthorized, response.ErrResp(http.StatusUnauthorized, "invalid access token"))
 				return
 			}
 			if err := m.opaqueService.ValidateUserTenantMembership(ctx, introspection.TenantID, introspection.UserID); err != nil {
 				m.logger.Warn("tenant membership validation failed", zap.Error(err), zap.String("path", c.Request.URL.Path))
-				c.AbortWithStatusJSON(http.StatusUnauthorized,
-					models.ErrorResponse{Error: "invalid or unauthorized token"})
+				c.AbortWithStatusJSON(http.StatusUnauthorized, response.ErrResp(http.StatusUnauthorized, "invalid or unauthorized token"))
 				return
 			}
 		}
@@ -101,8 +97,7 @@ func (m *PhantomTokenMiddleware) ExchangeOpaqueForJWT() gin.HandlerFunc {
 				zap.Error(err),
 				zap.String("path", c.Request.URL.Path),
 			)
-			c.AbortWithStatusJSON(http.StatusInternalServerError,
-				models.ErrorResponse{Error: "failed to generate internal token"})
+			c.AbortWithStatusJSON(http.StatusInternalServerError, response.ErrResp(http.StatusInternalServerError, "failed to generate internal token"))
 			return
 		}
 
@@ -138,4 +133,58 @@ func (m *PhantomTokenMiddleware) generateInternalJWT(introspection *models.Intro
 
 	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
 	return token.SignedString(m.jwtPrivateKey)
+}
+
+func (m *PhantomTokenMiddleware) ExchangeOpaqueForJWTWithoutTenant() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.Request.Header.Get("Authorization")
+		if len(authHeader) == 0 {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, response.ErrResp(http.StatusUnauthorized, "missing authorization token"))
+			return
+		}
+
+		tokenParts := strings.Split(authHeader, " ")
+		if len(tokenParts) != 2 || strings.ToUpper(tokenParts[0]) != "BEARER" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, response.ErrResp(http.StatusUnauthorized, "invalid authorization token format"))
+			return
+		}
+
+		opaqueToken := tokenParts[1]
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer cancel()
+
+		introspection, err := m.opaqueService.IntrospectToken(ctx, opaqueToken)
+		if err != nil || introspection == nil || !introspection.Active {
+			m.logger.Warn("token introspection failed", zap.Error(err), zap.String("path", c.Request.URL.Path))
+
+			c.AbortWithStatusJSON(http.StatusUnauthorized, response.ErrResp(http.StatusUnauthorized, "invalid or expired token"))
+			return
+		}
+
+		if introspection.IsService || introspection.TokenType != "access" || introspection.UserID == uuid.Nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, response.ErrResp(http.StatusUnauthorized, "invalid user access token"))
+			return
+		}
+
+		jwtToken, err := m.generateInternalJWT(introspection)
+		if err != nil {
+			m.logger.Warn("failed to generate internal token", zap.Error(err), zap.String("path", c.Request.URL.Path))
+
+			c.AbortWithStatusJSON(http.StatusInternalServerError, response.ErrResp(http.StatusInternalServerError, "failed to generate internal token"))
+			return
+		}
+
+		c.Request.Header.Set(consts.Authorization, "Bearer "+jwtToken)
+
+		c.Set(consts.OpaqueTokenID, opaqueToken)
+		c.Set(consts.UserID, introspection.UserID)
+		c.Set(consts.UserEmail, introspection.UserEmail)
+		c.Set(consts.TenantID, introspection.TenantID)
+		c.Set(consts.IsService, false)
+		c.Set(consts.ClientID, introspection.ClientID)
+		c.Set(consts.UserRole, enums.UserRole(introspection.UserRole))
+
+		c.Next()
+	}
 }

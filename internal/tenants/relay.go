@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/models"
 )
 
@@ -18,9 +19,9 @@ type OutboxRelay struct {
 }
 
 func NewOutboxRelay(config *models.Config, db *sql.DB, repo *TenantRepository, publisher InvitationPublisher) *OutboxRelay {
-	batch := 0
-	if config == nil {
-		batch = 50
+	var batch int
+	if config == nil || config.App.Batch <= 0 {
+		batch = consts.DefaultOutboxBatch
 	} else {
 		batch = config.App.Batch
 	}

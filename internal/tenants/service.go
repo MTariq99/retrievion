@@ -27,6 +27,7 @@ type InvitationPublisher interface {
 }
 type TenantMutation interface {
 	CreateTenantInvitations(ctx context.Context, tenantID, invitedBy uuid.UUID, invites []models.NewInvitation, expiresAt time.Time, outbox []models.OutboxMessage) error
+	AcceptInvitation(ctx context.Context, userID uuid.UUID, email string, tokenHash []byte) error
 }
 type TenantService struct {
 	userReader    UserReader
@@ -44,11 +45,7 @@ func NewTenantService(cfg *models.Config, userReader UserReader, repo *TenantRep
 	}
 }
 
-func (ts *TenantService) InviteUsers(
-	ctx context.Context,
-	ownerTenantID, userID uuid.UUID,
-	req *models.InviteUsers,
-) error {
+func (ts *TenantService) InviteUsers(ctx context.Context, ownerTenantID, userID uuid.UUID, req *models.InviteUsers) error {
 	if ownerTenantID == uuid.Nil {
 		return errs.ErrTenantIDRequired
 	}
@@ -147,6 +144,37 @@ func (ts *TenantService) InviteUsers(
 
 	if err := ts.TenantMutator.CreateTenantInvitations(ctx, ownerTenantID, userID, rows, expiresAt, msgs); err != nil {
 		return fmt.Errorf("create invitations: %w", err)
+	}
+
+	return nil
+}
+
+func (ts *TenantService) AcceptInvitation(ctx context.Context, userID uuid.UUID, req *models.AcceptInvitationRequest) error {
+	if userID == uuid.Nil {
+		return errs.ErrUnauthorized
+	}
+
+	if req == nil || strings.TrimSpace(req.Token) == "" {
+		return errs.ErrInvalidInvitationToken
+	}
+
+	user, err := ts.userReader.FindUserByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, errs.ErrNotFound) {
+			return errs.ErrUnauthorized
+		}
+
+		return fmt.Errorf("find authenticated user: %w", err)
+	}
+
+	if user == nil || strings.TrimSpace(user.Email) == "" {
+		return errs.ErrUnauthorized
+	}
+
+	tokenHash := utils.HashTokenBytes(req.Token)
+
+	if err := ts.TenantMutator.AcceptInvitation(ctx, userID, user.Email, tokenHash); err != nil {
+		return fmt.Errorf("accept tenant invitation: %w", err)
 	}
 
 	return nil
