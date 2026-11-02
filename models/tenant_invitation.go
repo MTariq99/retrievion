@@ -51,3 +51,12 @@ type OutboxMessage struct {
 type AcceptInvitationRequest struct {
 	Token string `json:"token" binding:"required"`
 }
+
+type ResendInvitationsRequest struct {
+	Emails []string `json:"emails" binding:"required"`
+}
+
+type ResendInvitation struct {
+	Email     string
+	TokenHash []byte
+}

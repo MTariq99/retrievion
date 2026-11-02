@@ -36,6 +36,7 @@ func (f *invitationTestUserReader) GetMembership(
 }
 
 type invitationTestMutator struct {
+	TenantMutation
 	calls  int
 	err    error
 	outbox []models.OutboxMessage
@@ -178,9 +179,9 @@ func TestInviteUsersAuthorization(t *testing.T) {
 				t.Fatalf("expected one outbox message, got %d", len(mutator.outbox))
 			}
 
-			if mutator.outbox[0].Kind != "invitation.email" {
+			if mutator.outbox[0].Kind != consts.OutBoxInvitationEventType {
 				t.Errorf("expected outbox kind %q, got %q",
-					"invitation.email", mutator.outbox[0].Kind)
+					consts.OutBoxInvitationEventType, mutator.outbox[0].Kind)
 			}
 
 			if len(mutator.outbox[0].Payload) == 0 {

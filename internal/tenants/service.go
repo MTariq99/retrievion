@@ -28,6 +28,7 @@ type InvitationPublisher interface {
 type TenantMutation interface {
 	CreateTenantInvitations(ctx context.Context, tenantID, invitedBy uuid.UUID, invites []models.NewInvitation, expiresAt time.Time, outbox []models.OutboxMessage) error
 	AcceptInvitation(ctx context.Context, userID uuid.UUID, email string, tokenHash []byte) error
+	ResendInvitations(ctx context.Context, tenantID uuid.UUID, invitedBy uuid.UUID, invites []models.ResendInvitation, expiresAt time.Time, outbox []models.OutboxMessage) error
 }
 type TenantService struct {
 	userReader    UserReader
@@ -137,7 +138,7 @@ func (ts *TenantService) InviteUsers(ctx context.Context, ownerTenantID, userID 
 
 		msgs[i] = models.OutboxMessage{
 			ID:      msg.MessageID,
-			Kind:    "invitation.email",
+			Kind:    consts.OutBoxInvitationEventType,
 			Payload: body,
 		}
 	}
@@ -175,6 +176,96 @@ func (ts *TenantService) AcceptInvitation(ctx context.Context, userID uuid.UUID,
 
 	if err := ts.TenantMutator.AcceptInvitation(ctx, userID, user.Email, tokenHash); err != nil {
 		return fmt.Errorf("accept tenant invitation: %w", err)
+	}
+
+	return nil
+}
+
+func (ts *TenantService) ResendInvitations(ctx context.Context, tenantID uuid.UUID, userID uuid.UUID, req *models.ResendInvitationsRequest) error {
+	if tenantID == uuid.Nil {
+		return errs.ErrTenantIDRequired
+	}
+	if userID == uuid.Nil {
+		return errs.ErrIDRequired
+	}
+	if req == nil || len(req.Emails) == 0 {
+		return errs.ErrInvalidInvitation
+	}
+
+	membership, err := ts.userReader.GetMembership(ctx, tenantID, userID)
+	if err != nil {
+		if errors.Is(err, errs.ErrNotFound) {
+			return errs.ErrUnauthorized
+		}
+		return fmt.Errorf("verify tenant membership: %w", err)
+	}
+
+	if membership == nil || membership.TenantID != tenantID || membership.UserID != userID || membership.Role != consts.RoleOwner {
+		return errs.ErrUnauthorized
+	}
+
+	seen := make(map[string]struct{}, len(req.Emails))
+	invites := make([]models.PendingInvite, 0, len(req.Emails))
+
+	for _, rawEmail := range req.Emails {
+		addr, err := mail.ParseAddress(strings.TrimSpace(rawEmail))
+		if err != nil {
+			return errs.ErrInvalidInvitation
+		}
+
+		email := strings.ToLower(addr.Address)
+
+		if _, exists := seen[email]; exists {
+			return errs.ErrInvalidInvitation
+		}
+		seen[email] = struct{}{}
+
+		token, err := utils.GenerateToken()
+		if err != nil {
+			return fmt.Errorf("generate invitation token: %w", err)
+		}
+
+		invites = append(invites, models.PendingInvite{
+			Email: email,
+			Token: token,
+			Hash:  utils.HashTokenBytes(token),
+		})
+	}
+
+	expiresAt := time.Now().UTC().Add(consts.InvitationTTL)
+
+	rows := make([]models.ResendInvitation, len(invites))
+	msgs := make([]models.OutboxMessage, len(invites))
+
+	for i, inv := range invites {
+		rows[i] = models.ResendInvitation{
+			Email:     inv.Email,
+			TokenHash: inv.Hash,
+		}
+
+		msg := models.InvitationEmailMessage{
+			MessageID:     uuid.NewString(),
+			TenantID:      tenantID,
+			Email:         inv.Email,
+			WorkspaceName: membership.TenantName,
+			Token:         inv.Token,
+			CreatedAt:     time.Now().UTC(),
+		}
+
+		body, err := json.Marshal(msg)
+		if err != nil {
+			return fmt.Errorf("encode invitation for %s: %w", inv.Email, err)
+		}
+
+		msgs[i] = models.OutboxMessage{
+			ID:      msg.MessageID,
+			Kind:    consts.OutBoxInvitationEventType,
+			Payload: body,
+		}
+	}
+
+	if err := ts.TenantMutator.ResendInvitations(ctx, tenantID, userID, rows, expiresAt, msgs); err != nil {
+		return fmt.Errorf("resend invitations: %w", err)
 	}
 
 	return nil

@@ -50,4 +50,5 @@ var (
 	ErrInvalidInvitationToken = errors.New("invalid invitation token")
 	ErrDeliveryInProgress     = errors.New("invitation delivery in progress on another worker")
 	ErrPermanent              = errors.New("permanent ingestion error")
+	ErrInvitationNotFound     = errors.New("invitation not found")
 )

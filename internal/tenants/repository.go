@@ -19,6 +19,18 @@ type TenantRepository struct {
 	db *sql.DB
 }
 
+type TenantOutboxTx struct {
+	tx *sql.Tx
+}
+
+func (d *TenantOutboxTx) Commit() error {
+	return d.tx.Commit()
+}
+
+func (d *TenantOutboxTx) Rollback() error {
+	return d.tx.Rollback()
+}
+
 type OutboxMessage struct {
 	ID       string
 	Payload  []byte
@@ -164,24 +176,7 @@ func (d *TenantOutboxTx) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-func (d *TenantOutboxTx) Commit() error {
-	return d.tx.Commit()
-}
-
-func (d *TenantOutboxTx) Rollback() error {
-	return d.tx.Rollback()
-}
-
-type TenantOutboxTx struct {
-	tx *sql.Tx
-}
-
-func (tr *TenantRepository) AcceptInvitation(
-	ctx context.Context,
-	userID uuid.UUID,
-	email string,
-	tokenHash []byte,
-) error {
+func (tr *TenantRepository) AcceptInvitation(ctx context.Context, userID uuid.UUID, email string, tokenHash []byte) error {
 	if userID == uuid.Nil {
 		return errs.ErrIDRequired
 	}
@@ -204,14 +199,13 @@ func (tr *TenantRepository) AcceptInvitation(
 		status          string
 		expiresAt       time.Time
 	)
-
-	// 1. Find and lock the invitation.
-	err = tx.QueryRowContext(ctx, `
+	tenantInvitationLookup := `
         SELECT id, tenant_id, email, role, status, expires_at
         FROM tenant_invitations
         WHERE token_hash = $1
         FOR UPDATE
-    `, tokenHash).Scan(
+    `
+	err = tx.QueryRowContext(ctx, tenantInvitationLookup, tokenHash).Scan(
 		&invitationID,
 		&tenantID,
 		&invitationEmail,
@@ -228,37 +222,26 @@ func (tr *TenantRepository) AcceptInvitation(
 		return fmt.Errorf("find invitation: %w", err)
 	}
 
-	// 2. Validate invitation.
-	if consts.InvitationStatus(status) != consts.InvitationStatusPending ||
-		!expiresAt.After(time.Now().UTC()) ||
-		!strings.EqualFold(
-			strings.TrimSpace(invitationEmail),
-			strings.TrimSpace(email),
-		) {
+	if consts.InvitationStatus(status) != consts.InvitationStatusPending || !expiresAt.After(time.Now().UTC()) || !strings.EqualFold(strings.TrimSpace(invitationEmail), strings.TrimSpace(email)) {
 		return errs.ErrInvalidInvitationToken
 	}
-
-	// 3. Create membership without overwriting an existing role.
-	_, err = tx.ExecContext(ctx, `
+	tenantMemberInsertion := `
         INSERT INTO tenant_members (tenant_id, user_id, role)
         VALUES ($1, $2, $3)
         ON CONFLICT (tenant_id, user_id) DO NOTHING
-    `, tenantID, userID, role)
+    `
+	_, err = tx.ExecContext(ctx, tenantMemberInsertion, tenantID, userID, role)
 	if err != nil {
 		return fmt.Errorf("create tenant membership: %w", err)
 	}
 
-	// 4. Mark invitation accepted.
+	updateInvitationStatus := `
+		UPDATE tenant_invitations
+		SET status = $1, accepted_by_user_id = $2
+		WHERE id = $3 AND status = $4
+	`
 	result, err := tx.ExecContext(
-		ctx, `
-        UPDATE tenant_invitations
-        SET
-            status = $2,
-            accepted_by_user_id = $3,
-            accepted_at = NOW()
-        WHERE id = $1
-          AND status = $4
-    `,
+		ctx, updateInvitationStatus,
 		invitationID,
 		consts.InvitationStatusAccepted,
 		userID,
@@ -277,9 +260,80 @@ func (tr *TenantRepository) AcceptInvitation(
 		return errs.ErrInvalidInvitationToken
 	}
 
-	// 5. Commit both changes together.
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit invitation acceptance: %w", err)
+	}
+
+	return nil
+}
+
+func (tr *TenantRepository) ResendInvitations(ctx context.Context, tenantID uuid.UUID, invitedBy uuid.UUID, invites []models.ResendInvitation, expiresAt time.Time, outbox []models.OutboxMessage) error {
+	if tenantID == uuid.Nil {
+		return errs.ErrTenantIDRequired
+	}
+	if invitedBy == uuid.Nil {
+		return errs.ErrIDRequired
+	}
+	if len(invites) == 0 || len(invites) != len(outbox) {
+		return errs.ErrInvalidInvitation
+	}
+
+	tx, err := tr.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	for i, inv := range invites {
+		result, err := tx.ExecContext(
+			ctx,
+			`
+			UPDATE tenant_invitations
+			SET token_hash = $3,
+			    expires_at = $4,
+			    invited_by_user_id = $5
+			WHERE tenant_id = $1
+			  AND lower(email) = $2
+			  AND status = $6
+			`,
+			tenantID,
+			inv.Email,
+			inv.TokenHash,
+			expiresAt.UTC(),
+			invitedBy,
+			consts.InvitationStatusPending,
+		)
+		if err != nil {
+			return fmt.Errorf("update invitation for %s: %w", inv.Email, err)
+		}
+
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("check invitation update for %s: %w", inv.Email, err)
+		}
+
+		if affected == 0 {
+			return fmt.Errorf("%s: %w", inv.Email, errs.ErrInvitationNotFound)
+		}
+
+		msg := outbox[i]
+
+		if _, err := tx.ExecContext(
+			ctx,
+			`
+			INSERT INTO outbox_messages (id, kind, payload)
+			VALUES ($1, $2, $3)
+			`,
+			msg.ID,
+			msg.Kind,
+			msg.Payload,
+		); err != nil {
+			return fmt.Errorf("insert outbox message %s: %w", msg.ID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit resend invitations: %w", err)
 	}
 
 	return nil

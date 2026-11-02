@@ -241,6 +241,7 @@ const (
 	InvitationDeadRoutingKey  = "email.dead"
 	InvitationMaxAttempts     = 5
 	InvitationRetryDelay      = 30 * time.Second
+	OutBoxInvitationEventType = "invitation.email"
 )
 
 const (

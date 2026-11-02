@@ -77,6 +77,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	tenantsInvitations := api.Group("/tenants/invitations")
 	{
 		tenantsInvitations.POST("", h.TenantHandler.InviteUsers)
+		tenantsInvitations.POST("/resend", h.TenantHandler.ResendInvitations)
 	}
 	r.POST("/api/v1/tenants/invitations/accept", h.phantom.ExchangeOpaqueForJWTWithoutTenant(), middleware.RequireUserToken(), h.TenantHandler.AcceptInvitation)
 }

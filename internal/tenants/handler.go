@@ -73,3 +73,28 @@ func (th *TenantHandler) AcceptInvitation(c *gin.Context) {
 
 	response.WriteEmptySuccessResponse(c, "invitation accepted successfully")
 }
+
+func (th *TenantHandler) ResendInvitations(c *gin.Context) {
+	claims, ok := utils.GetUserClaims(c)
+	if !ok {
+		errs.HandlerError(c, errs.ErrUnauthorized)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+
+	var req models.ResendInvitationsRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errs.HandlerError(c, errs.ErrInvalidRequest)
+		return
+	}
+
+	if err := th.tenantService.ResendInvitations(ctx, claims.TenantID, claims.UserId, &req); err != nil {
+		errs.HandlerError(c, err)
+		return
+	}
+
+	response.WriteEmptySuccessResponse(c, "invitations resent successfully")
+}
