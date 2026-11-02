@@ -88,9 +88,21 @@ func (s *Service) Chat(ctx context.Context, userID, tenantID uuid.UUID, req *mod
 	if err != nil {
 		return nil, fmt.Errorf("save user message: %w", err)
 	}
-	query := req.Message
+	originalQuery := strings.TrimSpace(req.Message)
+	rewriteRequest := s.prompt.RewriteQueryBuilder(originalQuery)
 
-	embeddings, err := s.embedding.Embed(ctx, []string{query})
+	rewriteResponse, rewriteErr := s.llm.Generate(ctx, rewriteRequest)
+	rewrittenQuery := originalQuery
+
+	if rewriteErr != nil {
+		s.logger.Warn("query rewriting failed; using original query", zap.Error(rewriteErr))
+	} else {
+		candidate := strings.TrimSpace(rewriteResponse.Text)
+		if candidate != "" {
+			rewrittenQuery = candidate
+		}
+	}
+	embeddings, err := s.embedding.Embed(ctx, []string{rewrittenQuery})
 	if err != nil {
 		return nil, fmt.Errorf("embed query: %w", err)
 	}
@@ -102,7 +114,7 @@ func (s *Service) Chat(ctx context.Context, userID, tenantID uuid.UUID, req *mod
 	retrievalQuery := models.RetrievalQuery{
 		TenantID:       tenantID,
 		UserID:         userID,
-		Query:          query,
+		Query:          rewrittenQuery,
 		QueryEmbedding: embeddings[0],
 	}
 	results, err := s.retrieval.Retrieve(ctx, retrievalQuery)
@@ -110,14 +122,14 @@ func (s *Service) Chat(ctx context.Context, userID, tenantID uuid.UUID, req *mod
 		return nil, fmt.Errorf("retrieve context: %w", err)
 	}
 
-	contextText := s.buildBoundedContext(conv, query, results)
+	contextText := s.buildBoundedContext(conv, originalQuery, results)
 
-	generateRequest, err := s.prompt.Build(conv, query, contextText)
+	generateRequest, err := s.prompt.Build(conv, originalQuery, contextText)
 	if err != nil {
 		return nil, fmt.Errorf("build prompt: %w", err)
 	}
 
-	result, err := s.llm.Generate(ctx, generateRequest.Prompt)
+	result, err := s.llm.Generate(ctx, generateRequest)
 	if err != nil {
 		return nil, fmt.Errorf("generate answer: %w", err)
 	}

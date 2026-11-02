@@ -441,7 +441,7 @@ func generateAnswerForEval(ctx context.Context, retrievalSvc *retrieval.Service,
 		return "", "", err
 	}
 
-	result, err := llmSvc.Generate(ctx, genReq.Prompt)
+	result, err := llmSvc.Generate(ctx, genReq)
 	if err != nil {
 		return "", "", err
 	}

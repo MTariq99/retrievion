@@ -469,10 +469,6 @@ Tests live next to the code as `*_test.go` files.
 
 **Not implemented:**
 
-* Resend or revoke invitation endpoints.
-* Automatic retries for ingestion jobs that fail. Only jobs stuck in `processing` are recovered.
-* Query rewriting.
-* Fine-grained retrieval permissions. Retrieval is scoped to the tenant, not to individual users or documents.
 * Automated CI/CD evaluation gating.
 * Kubernetes deployment manifests.
 

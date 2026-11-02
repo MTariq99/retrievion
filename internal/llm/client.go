@@ -104,11 +104,7 @@ func (c *Client) doGenerate(ctx context.Context, prompt string, maxTokens int, t
 	if resp.StatusCode != http.StatusOK {
 		body, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
-			return nil, fmt.Errorf(
-				"gemini: read error response (HTTP %d): %w",
-				resp.StatusCode,
-				readErr,
-			)
+			return nil, fmt.Errorf("gemini: read error response (HTTP %d): %w", resp.StatusCode, readErr)
 		}
 
 		var providerResponse struct {
@@ -256,20 +252,11 @@ func (e *ProviderError) Error() string {
 }
 
 func (e *ProviderError) ContextLengthExceeded() bool {
-	message := strings.ToLower(
-		e.Message + " " + e.Status + " " + e.Body,
-	)
+	message := strings.ToLower(e.Message + " " + e.Status + " " + e.Body)
 
-	return strings.Contains(message, "context length") ||
-		strings.Contains(message, "context window") ||
-		strings.Contains(message, "maximum context") ||
-		strings.Contains(message, "too many tokens") ||
-		strings.Contains(message, "input token") ||
-		strings.Contains(message, "token limit")
+	return strings.Contains(message, "context length") || strings.Contains(message, "context window") || strings.Contains(message, "maximum context") || strings.Contains(message, "too many tokens") || strings.Contains(message, "input token") || strings.Contains(message, "token limit")
 }
 
-// IsDailyQuotaExceeded reports whether an error indicates an exhausted
-// daily Gemini generation quota. It follows wrapped provider errors.
 func IsDailyQuotaExceeded(err error) bool {
 	var providerErr *ProviderError
 	if !errors.As(err, &providerErr) {

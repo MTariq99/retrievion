@@ -30,14 +30,20 @@ func NewService(provider Provider, cfg *models.Config, pricing PricePerMillionTo
 	return &Service{provider: provider, config: cfg, pricing: pricing, logger: logger}
 }
 
-func (s *Service) Generate(ctx context.Context, prompt string) (models.GenerateResponse, error) {
+func (s *Service) Generate(ctx context.Context, gReq models.GenerateRequest) (models.GenerateResponse, error) {
 	callCtx, cancel := context.WithTimeout(ctx, consts.LLMDefaultCallTimeout)
 	defer cancel()
+	if gReq.MaxTokens <= 0 {
+		gReq.MaxTokens = s.config.LLM.MaxTokens
+	}
 
+	if gReq.Temperature < 0 {
+		gReq.Temperature = s.config.LLM.Temperature
+	}
 	req := models.GenerateRequest{
-		Prompt:      prompt,
-		MaxTokens:   s.config.LLM.MaxTokens,
-		Temperature: s.config.LLM.Temperature,
+		Prompt:      gReq.Prompt,
+		MaxTokens:   gReq.MaxTokens,
+		Temperature: gReq.Temperature,
 	}
 
 	var lastErr error
@@ -72,14 +78,7 @@ func (s *Service) Generate(ctx context.Context, prompt string) (models.GenerateR
 
 		if err == nil {
 			cost := s.estimateCost(resp.Usage)
-			s.logger.Info(
-				"llm generate succeeded",
-				zap.String("model", s.config.LLM.Model),
-				zap.Int("prompt_tokens", resp.Usage.PromptTokens),
-				zap.Int("completion_tokens", resp.Usage.CompletionTokens),
-				zap.Duration("duration", duration),
-				zap.Float64("estimated_cost_usd", cost),
-			)
+			s.logger.Info("llm generate succeeded", zap.String("model", s.config.LLM.Model), zap.Int("prompt_tokens", resp.Usage.PromptTokens), zap.Int("completion_tokens", resp.Usage.CompletionTokens), zap.Duration("duration", duration), zap.Float64("estimated_cost_usd", cost))
 			return resp, nil
 		}
 
