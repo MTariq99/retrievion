@@ -2,11 +2,16 @@ package ingestion
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math/rand"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/mtariq99/retrievion/internal/consts"
+	"github.com/mtariq99/retrievion/internal/errs"
 	"github.com/mtariq99/retrievion/models"
 	"github.com/mtariq99/retrievion/pkg/objectstorage"
 )
@@ -40,19 +45,19 @@ func (p *Pipeline) Process(ctx context.Context, job models.Job) error {
 
 	version, err := p.repo.GetVersionForIngestion(ctx, job.DocumentVersionID)
 	if err != nil {
-		return p.fail(ctx, job.JobID, job.Attempt, fmt.Errorf("load version: %w", err))
+		return p.fail(ctx, job, fmt.Errorf("load version: %w", err))
 	}
 	tenantID := version.TenantID
 
 	obj, err := p.storage.Download(ctx, version.StorageKey)
 	if err != nil {
-		return p.fail(ctx, job.JobID, job.Attempt, fmt.Errorf("download object: %w", err))
+		return p.fail(ctx, job, fmt.Errorf("download object: %w", err))
 	}
 	defer obj.Close()
 
 	parsed, err := p.parser.Parse(ctx, obj, version.MimeType)
 	if err != nil {
-		return p.fail(ctx, job.JobID, job.Attempt, fmt.Errorf("parse document: %w", err))
+		return p.fail(ctx, job, fmt.Errorf("parse document: %w", err))
 	}
 	for _, w := range parsed.Warnings {
 		p.logger.Warn("document parsed with warnings", zap.String("job_id", job.JobID.String()), zap.String("warning", w))
@@ -60,7 +65,7 @@ func (p *Pipeline) Process(ctx context.Context, job models.Job) error {
 
 	chunks, err := p.chunker.Chunk(ctx, parsed, job.DocumentVersionID)
 	if err != nil {
-		return p.fail(ctx, job.JobID, job.Attempt, fmt.Errorf("chunk document: %w", err))
+		return p.fail(ctx, job, fmt.Errorf("chunk document: %w", err))
 	}
 
 	var texts []string
@@ -77,10 +82,10 @@ func (p *Pipeline) Process(ctx context.Context, job models.Job) error {
 	if len(texts) > 0 {
 		vectors, err := p.embedder.Embed(ctx, texts)
 		if err != nil {
-			return p.fail(ctx, job.JobID, job.Attempt, fmt.Errorf("generate embeddings: %w", err))
+			return p.fail(ctx, job, fmt.Errorf("generate embeddings: %w", err))
 		}
 		if len(vectors) != len(texts) {
-			return p.fail(ctx, job.JobID, job.Attempt, fmt.Errorf("embedding count mismatch: got %d, want %d", len(vectors), len(texts)))
+			return p.fail(ctx, job, fmt.Errorf("embedding count mismatch: got %d, want %d", len(vectors), len(texts)))
 		}
 		for i, id := range textChunkIDs {
 			embeddings[id] = vectors[i]
@@ -88,11 +93,11 @@ func (p *Pipeline) Process(ctx context.Context, job models.Job) error {
 	}
 
 	if err := p.repo.StoreChunks(ctx, tenantID, version.DocumentID, chunks, embeddings); err != nil {
-		return p.fail(ctx, job.JobID, job.Attempt, fmt.Errorf("store chunks: %w", err))
+		return p.fail(ctx, job, fmt.Errorf("store chunks: %w", err))
 	}
 
 	if err := p.repo.ActivateVersion(ctx, job.JobID, job.DocumentID, job.DocumentVersionID, job.Attempt); err != nil {
-		return p.fail(ctx, job.JobID, job.Attempt, fmt.Errorf("activate version: %w", err))
+		return p.fail(ctx, job, fmt.Errorf("activate version: %w", err))
 	}
 
 	if err := p.repo.MarkJobCompleted(ctx, job.JobID, job.Attempt); err != nil {
@@ -102,9 +107,29 @@ func (p *Pipeline) Process(ctx context.Context, job models.Job) error {
 	return nil
 }
 
-func (p *Pipeline) fail(ctx context.Context, jobID uuid.UUID, attempt int, cause error) error {
-	if markErr := p.repo.MarkJobFailed(ctx, jobID, attempt, cause); markErr != nil {
-		return fmt.Errorf("%w (also failed to record failure: %v)", cause, markErr)
+func (p *Pipeline) fail(ctx context.Context, job models.Job, cause error) error {
+	if errors.Is(cause, errs.ErrPermanent) || job.Attempt >= consts.IngestionMaxAttempts {
+		if markErr := p.repo.MarkJobFailed(ctx, job.JobID, job.Attempt, cause); markErr != nil {
+			return fmt.Errorf("%w (also failed to record failure: %v)", cause, markErr)
+		}
+		return cause
 	}
-	return cause
+
+	delay := retryDelay(job.Attempt)
+	if err := p.repo.ScheduleRetry(ctx, job, cause, delay); err != nil {
+		return fmt.Errorf("%w (also failed to schedule retry: %v)", cause, err)
+	}
+	p.logger.Warn("ingestion job scheduled for retry", zap.String("job_id", job.JobID.String()), zap.Int("attempt", job.Attempt), zap.Duration("delay", delay), zap.Error(cause))
+	return nil
+}
+
+func retryDelay(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	d := consts.IngestionRetryBaseDelay << (attempt - 1)
+	if d > consts.IngestionRetryMaxDelay || d <= 0 {
+		d = consts.IngestionRetryMaxDelay
+	}
+	return d + time.Duration(rand.Int63n(int64(d)/5))
 }

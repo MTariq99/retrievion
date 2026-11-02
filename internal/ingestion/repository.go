@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mtariq99/retrievion/internal/consts"
+	"github.com/mtariq99/retrievion/internal/errs"
 	"github.com/mtariq99/retrievion/models"
 )
 
@@ -138,12 +139,7 @@ func (r *Repository) MarkJobFailed(ctx context.Context, jobID uuid.UUID, attempt
 	return nil
 }
 
-func (r *Repository) StoreChunks(
-	ctx context.Context,
-	tenantID, documentID uuid.UUID,
-	chunks []models.Chunk,
-	embeddings map[uuid.UUID][]float32,
-) error {
+func (r *Repository) StoreChunks(ctx context.Context, tenantID, documentID uuid.UUID, chunks []models.Chunk, embeddings map[uuid.UUID][]float32) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin chunk transaction: %w", err)
@@ -154,7 +150,7 @@ func (r *Repository) StoreChunks(
 	seen := make(map[string]uuid.UUID, len(chunks))
 	for _, c := range chunks {
 		if c.ID == uuid.Nil {
-			return fmt.Errorf("store chunks: chunk ID is required")
+			return fmt.Errorf("%w: store chunks: chunk ID is required", errs.ErrPermanent)
 		}
 
 		var key string
@@ -165,10 +161,7 @@ func (r *Repository) StoreChunks(
 		}
 
 		if existing, ok := seen[key]; ok {
-			return fmt.Errorf(
-				"duplicate chunk content: hash=%s, chunks=%s and %s",
-				c.ContentHash, existing, c.ID,
-			)
+			return fmt.Errorf("%w: duplicate chunk content: hash=%s, chunks=%s and %s", errs.ErrPermanent, c.ContentHash, existing, c.ID)
 		}
 		seen[key] = c.ID
 	}
@@ -225,10 +218,7 @@ func (r *Repository) StoreChunks(
 		if c.ParentChunkID != nil {
 			resolvedParentID, ok := resolvedIDs[*c.ParentChunkID]
 			if !ok {
-				return fmt.Errorf(
-					"store chunk %s: parent chunk %s was not resolved first",
-					c.ID, *c.ParentChunkID,
-				)
+				return fmt.Errorf("%w: store chunk %s: parent chunk %s was not resolved first", errs.ErrPermanent, c.ID, *c.ParentChunkID)
 			}
 
 			parentID = &resolvedParentID
@@ -239,10 +229,7 @@ func (r *Repository) StoreChunks(
 		if c.ParentChunkID != nil {
 			vector, ok := embeddings[c.ID]
 			if !ok || len(vector) == 0 {
-				return fmt.Errorf(
-					"store child chunk %s: embedding is missing",
-					c.ID,
-				)
+				return fmt.Errorf("%w: store child chunk %s: embedding is missing", errs.ErrPermanent, c.ID)
 			}
 			embedding = pgVector(vector)
 		}
@@ -308,17 +295,11 @@ func (r *Repository) StoreChunks(
 		}
 
 		if storedTenantID != tenantID || storedDocumentID != documentID {
-			return fmt.Errorf(
-				"resolve chunk %s: existing chunk belongs to a different tenant or document",
-				c.ID,
-			)
+			return fmt.Errorf("%w: resolve chunk %s: existing chunk belongs to a different tenant or document", errs.ErrPermanent, c.ID)
 		}
 
 		if storedContent != c.Content {
-			return fmt.Errorf(
-				"resolve chunk %s: content hash collision or inconsistent stored content",
-				c.ID,
-			)
+			return fmt.Errorf("%w: resolve chunk %s: content hash collision or inconsistent stored content", errs.ErrPermanent, c.ID)
 		}
 
 		resolvedIDs[c.ID] = storedID
@@ -516,47 +497,51 @@ func (r *Repository) RecoverStaleJobs(ctx context.Context, staleAfter time.Durat
 	}
 
 	const query = `
-		WITH stale_jobs AS MATERIALIZED (
-			SELECT id, document_id, document_version_id
-			FROM ingestion_jobs
-			WHERE status = $1
-			  AND started_at IS NOT NULL
-			  AND started_at < now() - ($2 * INTERVAL '1 second')
-			ORDER BY started_at
-			LIMIT $3
-			FOR UPDATE SKIP LOCKED
-		),
-		requeued AS (
-			UPDATE ingestion_jobs AS j
-			SET status = $4,
-			    started_at = NULL,
-			    error = 'Recovered after processing timeout'
-			FROM stale_jobs AS s
-			WHERE j.id = s.id
-			  AND j.status = $1
-			RETURNING j.id, j.document_id, j.document_version_id
-		),
-		inserted_events AS (
-			INSERT INTO ingestion_outbox (
-				id,
-				event_type,
-				aggregate_id,
-				payload
-			)
-			SELECT
-				gen_random_uuid(),
-				$5,
-				r.id,
-				jsonb_build_object(
-					'job_id', r.id,
-					'document_id', r.document_id,
-					'version_id', r.document_version_id
-				)
-			FROM requeued AS r
-			RETURNING id
-		)
-		SELECT count(*) FROM inserted_events
-	`
+	WITH stale_jobs AS MATERIALIZED (
+		SELECT id, document_id, document_version_id, attempts
+		FROM ingestion_jobs
+		WHERE status = $1
+		  AND started_at IS NOT NULL
+		  AND started_at < now() - ($2 * INTERVAL '1 second')
+		ORDER BY started_at
+		LIMIT $3
+		FOR UPDATE SKIP LOCKED
+	),
+	exhausted AS (
+		UPDATE ingestion_jobs AS j
+		SET status = $6,
+		    started_at = NULL,
+		    error = 'Exceeded max attempts after processing timeout'
+		FROM stale_jobs AS s
+		WHERE j.id = s.id
+		  AND j.status = $1
+		  AND s.attempts >= $7
+		RETURNING j.id
+	),
+	requeued AS (
+		UPDATE ingestion_jobs AS j
+		SET status = $4,
+		    started_at = NULL,
+		    error = 'Recovered after processing timeout'
+		FROM stale_jobs AS s
+		WHERE j.id = s.id
+		  AND j.status = $1
+		  AND s.attempts < $7
+		RETURNING j.id, j.document_id, j.document_version_id
+	),
+	inserted_events AS (
+		INSERT INTO ingestion_outbox (id, event_type, aggregate_id, payload)
+		SELECT gen_random_uuid(), $5, r.id,
+		       jsonb_build_object(
+		           'job_id', r.id,
+		           'document_id', r.document_id,
+		           'version_id', r.document_version_id
+		       )
+		FROM requeued AS r
+		RETURNING id
+	)
+	SELECT count(*) FROM inserted_events
+`
 
 	var recovered int
 	err := r.db.QueryRowContext(
@@ -566,11 +551,53 @@ func (r *Repository) RecoverStaleJobs(ctx context.Context, staleAfter time.Durat
 		staleAfter.Seconds(),
 		limit,
 		consts.JobStatusQueued,
-		"ingestion.job.created",
+		consts.EventTypeIngestionJobCreated,
+		consts.JobStatusFailed,
+		consts.IngestionMaxAttempts,
 	).Scan(&recovered)
 	if err != nil {
 		return 0, fmt.Errorf("recover stale ingestion jobs: %w", err)
 	}
 
 	return recovered, nil
+}
+
+func (r *Repository) ScheduleRetry(ctx context.Context, job models.Job, cause error, delay time.Duration) error {
+	if cause == nil {
+		return fmt.Errorf("schedule retry: cause is required")
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin retry transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	result, err := tx.ExecContext(ctx, `
+		UPDATE ingestion_jobs
+		SET status = $2, started_at = NULL, error = $3
+		WHERE id = $1 AND status = $4 AND attempts = $5
+	`, job.JobID, consts.JobStatusQueued, cause.Error(), consts.JobStatusProcessing, job.Attempt)
+	if err != nil {
+		return fmt.Errorf("requeue job: %w", err)
+	}
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		return fmt.Errorf("schedule retry: job %s attempt %d is no longer current", job.JobID, job.Attempt)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO ingestion_outbox (id, event_type, aggregate_id, payload, next_attempt_at)
+		VALUES (
+			gen_random_uuid(), $1, $2::uuid,
+			jsonb_build_object('job_id', $2::uuid, 'document_id', $3::uuid, 'version_id', $4::uuid),
+			now() + ($5 * INTERVAL '1 second')
+		)
+	`, consts.EventTypeIngestionJobCreated, job.JobID, job.DocumentID, job.DocumentVersionID, delay.Seconds()); err != nil {
+		return fmt.Errorf("insert delayed outbox event: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit retry: %w", err)
+	}
+	return nil
 }

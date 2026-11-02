@@ -135,5 +135,4 @@ func (iw *InvitationWorker) send(ctx context.Context, m models.InvitationEmailMe
 	case <-ctx.Done():
 		return fmt.Errorf("send timed out: %w", ctx.Err())
 	}
-	return nil
 }

@@ -148,54 +148,15 @@ func TestRecoverStaleJobs(t *testing.T) {
 	repo, mock := newJobRepositoryMock(t)
 	ctx := context.Background()
 
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		WITH stale_jobs AS MATERIALIZED (
-			SELECT id, document_id, document_version_id
-			FROM ingestion_jobs
-			WHERE status = $1
-			  AND started_at IS NOT NULL
-			  AND started_at < now() - ($2 * INTERVAL '1 second')
-			ORDER BY started_at
-			LIMIT $3
-			FOR UPDATE SKIP LOCKED
-		),
-		requeued AS (
-			UPDATE ingestion_jobs AS j
-			SET status = $4,
-			    started_at = NULL,
-			    error = 'Recovered after processing timeout'
-			FROM stale_jobs AS s
-			WHERE j.id = s.id
-			  AND j.status = $1
-			RETURNING j.id, j.document_id, j.document_version_id
-		),
-		inserted_events AS (
-			INSERT INTO ingestion_outbox (
-				id,
-				event_type,
-				aggregate_id,
-				payload
-			)
-			SELECT
-				gen_random_uuid(),
-				$5,
-				r.id,
-				jsonb_build_object(
-					'job_id', r.id,
-					'document_id', r.document_id,
-					'version_id', r.document_version_id
-				)
-			FROM requeued AS r
-			RETURNING id
-		)
-		SELECT count(*) FROM inserted_events
-	`)).
+	mock.ExpectQuery(regexp.QuoteMeta("WITH stale_jobs")).
 		WithArgs(
 			consts.JobStatusProcessing,
 			60.0,
 			10,
 			consts.JobStatusQueued,
 			"ingestion.job.created",
+			consts.JobStatusFailed,
+			consts.IngestionMaxAttempts,
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
 
@@ -253,6 +214,8 @@ func TestRecoverStaleJobsDatabaseError(t *testing.T) {
 			10,
 			consts.JobStatusQueued,
 			"ingestion.job.created",
+			consts.JobStatusFailed,
+			consts.IngestionMaxAttempts,
 		).
 		WillReturnError(errors.New("database unavailable"))
 

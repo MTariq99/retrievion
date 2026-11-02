@@ -2,12 +2,15 @@ package ingestion
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"go.uber.org/zap"
 
+	"github.com/google/uuid"
 	"github.com/mtariq99/retrievion/internal/consts"
 	"github.com/mtariq99/retrievion/internal/storage"
+	"github.com/mtariq99/retrievion/models"
 )
 
 type Worker struct {
@@ -46,4 +49,26 @@ func (w *Worker) handle(ctx context.Context, msg []byte) (err error) {
 	}
 
 	return nil
+}
+
+func ParseJob(body []byte) (models.Job, error) {
+	var p models.JobPayload
+	if err := json.Unmarshal(body, &p); err != nil {
+		return models.Job{}, fmt.Errorf("unmarshal ingestion job: %w", err)
+	}
+
+	jobID, err := uuid.Parse(p.JobID)
+	if err != nil {
+		return models.Job{}, fmt.Errorf("parse job_id: %w", err)
+	}
+	documentID, err := uuid.Parse(p.DocumentID)
+	if err != nil {
+		return models.Job{}, fmt.Errorf("parse document_id: %w", err)
+	}
+	versionID, err := uuid.Parse(p.DocumentVersionID)
+	if err != nil {
+		return models.Job{}, fmt.Errorf("parse version_id: %w", err)
+	}
+
+	return models.Job{JobID: jobID, DocumentID: documentID, DocumentVersionID: versionID}, nil
 }

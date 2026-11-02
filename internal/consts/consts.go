@@ -155,6 +155,12 @@ const (
 	JobStatusDeadLetter JobStatus = "dead_letter"
 )
 
+const (
+	IngestionMaxAttempts    = 5
+	IngestionRetryBaseDelay = 30 * time.Second
+	IngestionRetryMaxDelay  = 10 * time.Minute
+)
+
 // ============================================================
 // CHUNKING
 // ============================================================
